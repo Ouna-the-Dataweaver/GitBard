@@ -19,6 +19,7 @@ app = FastAPI(
 
 GITLAB_URL = os.getenv("GITLAB_URL", "https://gitlab.example.com")
 GITLAB_PAT = os.getenv("GITLAB_PAT", "")
+HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8585"))
 
 
@@ -66,5 +67,5 @@ async def gitlab_webhook(request: Request):
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info(f"Starting server on port {PORT}")
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    logger.info(f"Starting server on {HOST}:{PORT}")
+    uvicorn.run(app, host=HOST, port=PORT)
