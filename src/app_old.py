@@ -85,40 +85,50 @@ async def health_check():
 
 @app.post("/webhook")
 async def gitlab_webhook(request: Request):
-    """Receive GitLab webhook events - async, then triggers sync pipeline"""
+    """Receive GitLab webhook events"""
     try:
         payload = await request.json()
 
         event_type = payload.get("object_kind")
-        if event_type != "note":
-            return JSONResponse({"status": "ignored"})
+        project = payload.get("project", {})
+        project_name = project.get("name", "unknown")
 
-        note = payload.get("object_attributes", {}).get("note", "")
+        logger.info(f"Received webhook: {event_type} from project '{project_name}'")
+        logger.debug(f"Full payload: {payload}")
 
-        from src.pipelines.registry import detect_command
+        if event_type == "merge_request":
+            mr = payload.get("object_attributes", {})
+            action = mr.get("action", "unknown")
+            mr_iid = mr.get("iid", "unknown")
+            logger.info(f"Merge Request event: {action} - MR !{mr_iid}")
+        elif event_type == "note":
+            note = payload.get("object_attributes", {})
+            note_type = note.get("noteable_type", "unknown")
+            note_content = note.get("note", "")
+            logger.info(f"Note event on {note_type}")
+            logger.info(f"Note payload keys: {list(note.keys())}")
 
-        command = detect_command(note)
+            if "/oc_test" in note_content:
+                logger.info("Detected /oc_test command in note")
+                project_id = project.get("id")
+                noteable_iid = None
+                if note_type == "MergeRequest":
+                    noteable_iid = payload.get("merge_request", {}).get("iid")
+                elif note_type == "Issue":
+                    noteable_iid = payload.get("issue", {}).get("iid")
+                if noteable_iid is None:
+                    noteable_iid = note.get("noteable_id")
 
-        if not command:
-            return JSONResponse({"status": "ignored"})
+                logger.info(
+                    "Project ID: %s, noteable_iid: %s", project_id, noteable_iid
+                )
+                post_gitlab_note(
+                    project_id, note_type, noteable_iid, "test hook triggered"
+                )
 
-        from src.pipelines.base import PipelineContext
-
-        context = PipelineContext(webhook_payload=payload)
-
-        pipeline = command.get_pipeline()
-
-        import asyncio
-
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, pipeline.execute, context)
-
-        if result.success:
-            return JSONResponse({"status": "completed", "command": command.name})
-        else:
-            return JSONResponse(
-                {"status": "error", "error": str(result.error)}, status_code=500
-            )
+        return JSONResponse(
+            {"status": "received", "event_type": event_type, "project": project_name}
+        )
 
     except Exception as e:
         logger.error(f"Error processing webhook: {e}", exc_info=True)

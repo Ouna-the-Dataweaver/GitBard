@@ -1,125 +1,92 @@
 # GitLab AI Code Reviewer
 
-Simple webhook service for AI-powered code review on GitLab Merge Requests.
+Webhook-driven pipeline system for AI-powered code review on GitLab Merge Requests and Issues.
 
-## Features
+## Current State
 
-- Receives GitLab webhook events (MR and comments)
-- Built with FastAPI
-- Async support for high performance
-- Type-safe with Pydantic models
-- Health check endpoint
+**Pipeline architecture is in place.** The system receives webhooks, detects commands (`/oc_review`, `/oc_ask`, `/oc_test`), and executes multi-stage pipelines. However, **OpenCode agent integration is not yet implemented** - the `AgentExecutorStage` currently returns placeholder results.
 
-## Prerequisites
+## Architecture
 
-- [uv](https://github.com/astral-sh/uv) - Python package manager
-- Python 3.11+ (uv will handle this)
-- GitLab Personal Access Token with `api` scope
+```
+oc_hooks/
+├── app.py                      # FastAPI webhook handler (async → sync bridge)
+├── src/
+│   ├── app_old.py              # Original app (for post_gitlab_note helper)
+│   └── pipelines/
+│       ├── base.py             # Pipeline, Stage, Context, Result classes
+│       ├── registry.py         # Command detection and pipeline factory
+│       ├── stages/
+│       │   ├── hook_resolver.py    # Detect commands, post "started" note
+│       │   ├── snapshot_resolver.py # Resolve SHA/branch from MR
+│       │   ├── context_builder.py   # Clone repo to temp directory
+│       │   ├── agent_executor.py    # TODO: Run OpenCode agent
+│       │   └── note_updater.py      # Post results or errors
+│       └── commands/
+│           ├── base.py         # Command base class
+│           ├── oc_review.py    # /oc_review pipeline
+│           ├── oc_ask.py       # /oc_ask pipeline
+│           └── oc_test.py      # /oc_test pipeline
+└── tests/                      # Unit tests (13 passing)
+```
 
-## Setup
+## Commands
 
-1. **Clone and navigate to the project:**
-   ```bash
-   cd /mnt/asr_hot/agafonov/repos_2/oc_hooks
-   ```
-
-2. **Create virtual environment with uv:**
-   ```bash
-   uv venv
-   source .uv/bin/activate  # On Linux/Mac
-   # or
-   .uv\Scripts\activate     # On Windows
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   uv pip install fastapi uvicorn[standard] pydantic python-dotenv httpx
-   ```
-
-4. **Configure environment variables:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your GitLab credentials
-   ```
-   
-   Required variables:
-   - `GITLAB_URL` - Your GitLab instance URL
-   - `GITLAB_PAT` - Personal Access Token
-   - `PORT` - Server port (default: 8585)
+- `/oc_review` - Review code in the merge request
+- `/oc_ask` - Answer questions about the code
+- `/oc_test` - Run tests or analyze test coverage
 
 ## Running
 
-### Development
+```bash
+uv run python app.py
+```
+
+Or with hot reload:
+
 ```bash
 uv run uvicorn app:app --reload --host 0.0.0.0 --port 8585
 ```
 
-### Production
-```bash
-uv run uvicorn app:app --host 0.0.0.0 --port 8585 --workers 4
+## Known Issues
+
+### Recursive Webhook Loop (Hack Fix)
+
+**Problem:** When the bot posts a note with results, GitLab sends another webhook event, triggering the pipeline again → infinite loop.
+
+**Current Hack Fix:** The `HookResolverStage` filters out notes starting with "🤖 OpenCode".
+
+**Real Fix (TODO):** When using a dedicated bot account, filter by `user_id` instead of message content. This requires:
+1. A GitLab bot account with its own PAT
+2. Checking `payload.get("user_id")` against the bot's user ID
+3. Removing the "🤖 OpenCode" string check
+
+### OpenCode Agent Integration
+
+The `AgentExecutorStage` (`src/pipelines/stages/agent_executor.py`) currently returns placeholder results:
+
+```python
+result = AgentResult(
+    content=f"Agent result for {self.agent_type}: {prompt[:100]}...",
+    format="markdown",
+)
 ```
+
+This needs to be replaced with actual OpenCode agent invocation.
+
+## Setup
+
+1. Configure `.env`:
+   - `GITLAB_URL` - GitLab instance URL
+   - `GITLAB_PAT` - Personal Access Token
+   - `HOST`/`PORT` - Server binding
+
+2. Add webhook in GitLab project:
+   - URL: `http://your-server:8585/webhook`
+   - Trigger: Comments events
 
 ## Testing
 
-1. **Start the server** (in one terminal)
-2. **Run the test script** (in another terminal):
-   ```bash
-   python test_webhook.py
-   ```
-
-3. **Test health endpoint:**
-   ```bash
-   curl http://localhost:8585/health
-   ```
-
-4. **Test webhook manually:**
-   ```bash
-   curl -X POST http://localhost:8585/webhook \
-     -H "Content-Type: application/json" \
-     -d '{"object_kind":"merge_request","project":{"name":"test"}}'
-   ```
-
-## API Documentation
-
-Once the server is running, visit:
-- Swagger UI: http://localhost:8585/docs
-- ReDoc: http://localhost:8585/redoc
-
-## GitLab Webhook Configuration
-
-1. Go to your GitLab project: **Settings → Webhooks**
-2. Add a new webhook:
-   - **URL**: `http://your-server:8585/webhook`
-   - **Secret Token**: (optional) add a secret for verification
-   - **Trigger events**:
-     - ✅ Merge request events
-     - ✅ Comments events
-3. Click "Add webhook"
-
-## Project Structure
-
+```bash
+uv run pytest tests/ -v
 ```
-oc_hooks/
-├── app.py              # Main FastAPI application
-├── models.py           # Pydantic models for webhooks
-├── test_webhook.py     # Test script
-├── .env                # Environment variables (not in git)
-├── .env.example        # Environment template
-├── .gitignore          # Git ignore rules
-├── README.md           # This file
-└── requirements.txt    # Python dependencies (auto-generated)
-```
-
-## Development Plan
-
-- [x] Basic webhook receiver
-- [x] Health check endpoint
-- [ ] GitLab API client (fetch MR diffs, post comments)
-- [ ] AI integration (call AI model for code review)
-- [ ] Manual trigger via `/ai-review` comment
-- [ ] Auto-review on MR open
-- [ ] Error handling and logging improvements
-
-## License
-
-MIT
