@@ -2,11 +2,14 @@ import json
 import logging
 import os
 import subprocess
+from pathlib import Path
 from typing import List
 
 from ..base import Stage, StageResult, PipelineContext, AgentResult
 
 logger = logging.getLogger(__name__)
+REPO_ROOT = Path(__file__).resolve().parents[3]
+OPENCODE_CONFIG_PATH = REPO_ROOT / "opencode.json"
 
 
 class OpencodeIntegrationStage(Stage):
@@ -23,6 +26,9 @@ class OpencodeIntegrationStage(Stage):
 
         question = self._extract_question(context)
         prompt = self._build_prompt(context, repo_dir, question)
+        env = os.environ.copy()
+        if OPENCODE_CONFIG_PATH.exists():
+            env.setdefault("OPENCODE_CONFIG", str(OPENCODE_CONFIG_PATH))
 
         result = subprocess.run(
             [
@@ -40,6 +46,7 @@ class OpencodeIntegrationStage(Stage):
             check=False,
             capture_output=True,
             text=True,
+            env=env,
         )
 
         if result.returncode != 0:
@@ -83,14 +90,13 @@ class OpencodeIntegrationStage(Stage):
     def _build_prompt(
         self, context: PipelineContext, repo_dir: str, question: str
     ) -> str:
-        noteable_type = context.metadata.get("noteable_type") or "thread"
-        prompt = [
-            f"Answer this GitLab {noteable_type.lower()} question:",
-            "",
-            question,
-            "",
-            "Work inside the checked out repository.",
-        ]
+        noteable_type = self._format_noteable_type(
+            context.metadata.get("noteable_type") or "thread"
+        )
+        if context.command == "oc_review":
+            prompt = self._build_review_prompt(noteable_type, question)
+        else:
+            prompt = self._build_question_prompt(noteable_type, question)
 
         thread_context_path = context.metadata.get("thread_context_path")
         if thread_context_path:
@@ -105,13 +111,35 @@ class OpencodeIntegrationStage(Stage):
                 f"Current review scope is {source_branch or '?'} -> {target_branch or '?'}."
             )
 
-        prompt.extend(
-            [
-                "If this is a merge request, summarize the MR first and then provide a concise review.",
-                "Base the answer on the local repository and the provided GitLab context file.",
-            ]
+        prompt.append(
+            "Base the answer on the local repository and the provided GitLab context file."
         )
         return "\n\n".join(part for part in prompt if part)
+
+    def _build_question_prompt(self, noteable_type: str, question: str) -> List[str]:
+        return [
+            f"Answer this GitLab {noteable_type.lower()} question:",
+            question,
+            "Work inside the checked out repository.",
+            "If this is a merge request, summarize the MR first and then provide a concise review.",
+        ]
+
+    def _build_review_prompt(self, noteable_type: str, question: str) -> List[str]:
+        prompt = [
+            f"Review this GitLab {noteable_type.lower()}.",
+            "Work inside the checked out repository.",
+            "Inspect the actual changed files and diff before writing findings.",
+            "If this is a merge request, summarize the MR briefly before listing findings.",
+        ]
+        if question != "No additional question provided.":
+            prompt.append(f"Additional reviewer request: {question}")
+        return prompt
+
+    def _format_noteable_type(self, noteable_type: str) -> str:
+        normalized = noteable_type.replace("_", " ").strip()
+        if normalized == "MergeRequest":
+            return "merge request"
+        return normalized.lower()
 
     def _extract_text_events(self, lines: List[str]) -> str:
         chunks: List[str] = []

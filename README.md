@@ -5,8 +5,9 @@ Webhook-driven pipeline system for AI-powered code review on GitLab Merge Reques
 ## Current State
 
 **Pipeline architecture is in place.** The system receives note webhooks, detects slash commands and bot mentions, and replies back into GitLab. Command execution is partially implemented:
-- `/oc_review` and `/oc_ask` run through the pipeline, but the final answer still comes from the placeholder `AgentExecutorStage`.
-- `/oc_test` uses the real `opencode` CLI path, so it is the only command with non-placeholder agent execution today.
+- `/oc_review` now uses the real `opencode` CLI path with a dedicated review agent prompt from [`opencode.json`](/mnt/asr_hot/agafonov/repos_2/GitBard/opencode.json).
+- `/oc_ask` uses the real `opencode` CLI path with the default agent.
+- `/oc_test` uses the same real `opencode` CLI path for ad hoc testing.
 - `@nid-bugbard` mention pings now trigger a simple confirmation reply so you can verify delivery end to end.
 
 ## Architecture
@@ -36,8 +37,8 @@ oc_hooks/
 ## Triggers
 
 - `@nid-bugbard` - Replies with a simple "ping received" message to prove webhook delivery works.
-- `/oc_review` - Pipeline works, but the final review text is still placeholder output.
-- `/oc_ask` - Pipeline works, but the final answer text is still placeholder output.
+- `/oc_review` - Runs the `opencode` CLI with the `gitlab-review` agent defined in `opencode.json`.
+- `/oc_ask` - Runs the `opencode` CLI and posts its response back to the thread.
 - `/oc_test` - Runs the `opencode` CLI and posts its response back to the thread.
 
 ## Running
@@ -60,16 +61,7 @@ Bot-authored notes are ignored by comparing the webhook `user.username` with `GI
 
 ### OpenCode Agent Integration
 
-The `AgentExecutorStage` (`src/pipelines/stages/agent_executor.py`) currently returns placeholder results:
-
-```python
-result = AgentResult(
-    content=f"Agent result for {self.agent_type}: {prompt[:100]}...",
-    format="markdown",
-)
-```
-
-This needs to be replaced with actual OpenCode agent invocation.
+`OpencodeIntegrationStage` points `OPENCODE_CONFIG` at this repo’s [`opencode.json`](/mnt/asr_hot/agafonov/repos_2/GitBard/opencode.json) before launching `opencode run` inside the checked out target repository. That lets the webhook app keep its own reusable review agent and prompt while still running against the cloned MR codebase.
 
 ## Setup
 
@@ -78,7 +70,7 @@ This needs to be replaced with actual OpenCode agent invocation.
    - `GITLAB_PAT` - Personal Access Token
    - `GITLAB_USER` - GitLab username that will be mentioned, for example `nid-bugbard`
    - `OPENCODE_MODEL` - OpenCode model id, defaults to `minimax/MiniMax-M2.1`
-   - `OPENCODE_AGENT` - OpenCode agent name, defaults to `Build`
+   - `OPENCODE_AGENT` - OpenCode agent name for general commands, defaults to `Build`
    - `HOST`/`PORT` - Server binding
 
 2. Add webhook in GitLab project:

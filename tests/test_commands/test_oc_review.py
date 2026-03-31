@@ -12,6 +12,7 @@ def test_review_command():
     pipeline = cmd.get_pipeline()
     assert pipeline.name == "oc_review"
     assert len(pipeline.stages) == 5
+    assert isinstance(pipeline.stages[3], OpencodeIntegrationStage)
 
 
 def test_ask_command():

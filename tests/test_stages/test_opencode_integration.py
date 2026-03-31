@@ -20,9 +20,10 @@ def test_opencode_integration_uses_question_and_issue_context(monkeypatch, tmp_p
     stage = OpencodeIntegrationStage()
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text):
+    def fake_run(args, cwd, check, capture_output, text, env):
         captured["args"] = args
         captured["cwd"] = cwd
+        captured["env"] = env
         return MagicMock(
             returncode=0,
             stdout='{"type":"text","part":{"text":"Answer"}}\n'
@@ -41,11 +42,12 @@ def test_opencode_integration_uses_question_and_issue_context(monkeypatch, tmp_p
             "Answer this GitLab thread question:",
             "why is the pipeline failing?",
             "Work inside the checked out repository.",
-            "Use the thread context in gitlab_issue_content.md.",
             "If this is a merge request, summarize the MR first and then provide a concise review.",
+            "Use the thread context in gitlab_issue_content.md.",
             "Base the answer on the local repository and the provided GitLab context file.",
         ]
     )
+    assert captured["env"]["OPENCODE_CONFIG"].endswith("/GitBard/opencode.json")
     assert context.agent_result is not None
     assert context.agent_result.content == "Answer ready"
     assert (tmp_path / "opencode_events.jsonl").exists()
@@ -64,7 +66,7 @@ def test_opencode_integration_defaults_when_question_missing(monkeypatch, tmp_pa
     stage = OpencodeIntegrationStage()
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text):
+    def fake_run(args, cwd, check, capture_output, text, env):
         captured["prompt"] = args[-1]
         return MagicMock(returncode=0, stdout="", stderr="")
 
@@ -101,7 +103,7 @@ def test_opencode_integration_uses_env_model_and_agent(monkeypatch, tmp_path):
     stage = OpencodeIntegrationStage()
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text):
+    def fake_run(args, cwd, check, capture_output, text, env):
         captured["args"] = args
         return MagicMock(returncode=0, stdout="", stderr="")
 
@@ -112,3 +114,41 @@ def test_opencode_integration_uses_env_model_and_agent(monkeypatch, tmp_path):
     assert not result.should_stop
     assert captured["args"][5] == "openai/gpt-4.1-mini"
     assert captured["args"][7] == "Reviewer"
+
+
+def test_opencode_integration_uses_review_prompt_and_agent(monkeypatch, tmp_path):
+    context = PipelineContext(
+        webhook_payload={},
+        command="oc_review",
+        local_context_path=str(tmp_path),
+        metadata={
+            "note_body": "/oc_review focus on auth changes",
+            "trigger_pattern": "/oc_review",
+            "noteable_type": "MergeRequest",
+        },
+    )
+    stage = OpencodeIntegrationStage(agent="gitlab-review")
+    captured = {}
+
+    def fake_run(args, cwd, check, capture_output, text, env):
+        captured["args"] = args
+        captured["env"] = env
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("src.pipelines.stages.opencode_integration.subprocess.run", fake_run)
+
+    result = stage.execute(context)
+
+    assert not result.should_stop
+    assert captured["args"][7] == "gitlab-review"
+    assert captured["args"][-1] == "\n\n".join(
+        [
+            "Review this GitLab merge request.",
+            "Work inside the checked out repository.",
+            "Inspect the actual changed files and diff before writing findings.",
+            "If this is a merge request, summarize the MR briefly before listing findings.",
+            "Additional reviewer request: focus on auth changes",
+            "Base the answer on the local repository and the provided GitLab context file.",
+        ]
+    )
+    assert captured["env"]["OPENCODE_CONFIG"].endswith("/GitBard/opencode.json")

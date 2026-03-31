@@ -3,7 +3,7 @@ from .base import Command
 from ..stages.hook_resolver import HookResolverStage
 from ..stages.snapshot_resolver import SnapshotResolverStage
 from ..stages.context_builder import ContextBuilderStage
-from ..stages.agent_executor import AgentExecutorStage
+from ..stages.opencode_integration import OpencodeIntegrationStage
 from ..stages.note_updater import NoteUpdaterStage
 
 
@@ -23,7 +23,7 @@ class ReviewCommand(Command):
                 HookResolverStage(),
                 SnapshotResolverStage(),
                 ContextBuilderStage(),
-                AgentExecutorStage(agent_type="review"),
+                OpencodeIntegrationStage(agent="gitlab-review"),
                 NoteUpdaterStage(),
             ],
         )
