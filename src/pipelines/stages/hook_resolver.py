@@ -1,5 +1,6 @@
 from ..base import Stage, StageResult, PipelineContext
 import logging
+from src.gitlab_api import extract_noteable_iid, post_gitlab_note
 
 logger = logging.getLogger(__name__)
 
@@ -33,27 +34,18 @@ class HookResolverStage(Stage):
         context.metadata["note_body"] = note
         context.metadata["trigger_pattern"] = command.trigger_pattern
 
-        from src.app_old import post_gitlab_note
-
         project_id = payload.get("project", {}).get("id")
-        noteable_iid = self._get_noteable_iid(payload)
+        noteable_iid = extract_noteable_iid(payload)
 
         note_response = post_gitlab_note(
             project_id,
             noteable_type,
             noteable_iid,
             f"🤖 OpenCode started working on `{command.trigger_pattern}`...",
+            project=payload.get("project"),
         )
 
         if note_response:
             context.gitlab_note_id = note_response.get("id")
 
         return StageResult(context=context, should_stop=False)
-
-    def _get_noteable_iid(self, payload: dict) -> int:
-        noteable_type = payload.get("object_attributes", {}).get("noteable_type")
-        if noteable_type == "MergeRequest":
-            return payload.get("merge_request", {}).get("iid")
-        elif noteable_type == "Issue":
-            return payload.get("issue", {}).get("iid")
-        return payload.get("object_attributes", {}).get("noteable_id")

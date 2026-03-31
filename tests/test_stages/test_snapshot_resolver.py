@@ -6,6 +6,7 @@ from src.pipelines.base import PipelineContext
 def test_snapshot_resolver_mr():
     payload = {
         "object_kind": "note",
+        "project": {"default_branch": "main"},
         "object_attributes": {"noteable_type": "MergeRequest"},
         "merge_request": {
             "diff_refs": {"head_sha": "abc123"},
@@ -22,11 +23,34 @@ def test_snapshot_resolver_mr():
     assert not result.should_stop
     assert context.code_snapshot["sha"] == "abc123"
     assert context.code_snapshot["source_branch"] == "feature"
+    assert context.code_snapshot["branch"] == "feature"
+
+
+def test_snapshot_resolver_mr_falls_back_to_source_branch_when_sha_missing():
+    payload = {
+        "object_kind": "note",
+        "project": {"default_branch": "main"},
+        "object_attributes": {"noteable_type": "MergeRequest"},
+        "merge_request": {
+            "source_branch": "db",
+            "target_branch": "main",
+        },
+    }
+    context = PipelineContext(webhook_payload=payload)
+    context.metadata["noteable_type"] = "MergeRequest"
+    stage = SnapshotResolverStage()
+
+    result = stage.execute(context)
+
+    assert not result.should_stop
+    assert context.code_snapshot["sha"] is None
+    assert context.code_snapshot["branch"] == "db"
 
 
 def test_snapshot_resolver_issue():
     payload = {
         "object_kind": "note",
+        "project": {"default_branch": "trunk"},
         "object_attributes": {"noteable_type": "Issue"},
         "issue": {"iid": 1},
     }
@@ -37,5 +61,5 @@ def test_snapshot_resolver_issue():
     result = stage.execute(context)
 
     assert not result.should_stop
-    assert context.code_snapshot["branch"] == "main"
+    assert context.code_snapshot["branch"] == "trunk"
     assert context.code_snapshot["sha"] is None

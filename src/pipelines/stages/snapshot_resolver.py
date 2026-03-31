@@ -10,6 +10,7 @@ class SnapshotResolverStage(Stage):
     def _execute(self, context: PipelineContext) -> StageResult:
         payload = context.webhook_payload
         noteable_type = context.metadata.get("noteable_type")
+        project = payload.get("project", {})
 
         snapshot = {}
 
@@ -18,9 +19,12 @@ class SnapshotResolverStage(Stage):
             snapshot["sha"] = mr.get("diff_refs", {}).get("head_sha")
             snapshot["source_branch"] = mr.get("source_branch")
             snapshot["target_branch"] = mr.get("target_branch")
+            snapshot["branch"] = snapshot["source_branch"] or project.get(
+                "default_branch"
+            )
         elif noteable_type == "Issue":
             snapshot["sha"] = None
-            snapshot["branch"] = "main"
+            snapshot["branch"] = project.get("default_branch") or "main"
 
         context.code_snapshot = snapshot
         logger.info(f"Resolved code snapshot: {snapshot}")

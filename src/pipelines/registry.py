@@ -1,3 +1,4 @@
+import re
 from typing import Optional, List
 from .commands.base import Command
 from .commands.oc_review import ReviewCommand
@@ -15,6 +16,15 @@ def detect_command(text: str) -> Optional[Command]:
         if command.trigger_pattern in text:
             return command
     return None
+
+
+def contains_user_mention(text: str, username: str) -> bool:
+    """Detect an exact GitLab @mention for the configured bot user."""
+    normalized_username = username.strip().lstrip("@")
+    if not normalized_username:
+        return False
+    pattern = rf"(?<![\w@])@{re.escape(normalized_username)}(?![\w-])"
+    return re.search(pattern, text) is not None
 
 
 def get_pipeline_for_command(command_name: str) -> Optional[Pipeline]:

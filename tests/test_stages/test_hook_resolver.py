@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from src.pipelines.stages.hook_resolver import HookResolverStage
 from src.pipelines.base import PipelineContext
 
@@ -17,7 +17,7 @@ def test_hook_resolver_detects_command():
     context = PipelineContext(webhook_payload=payload)
     stage = HookResolverStage()
 
-    with patch("src.app_old.post_gitlab_note") as mock_post:
+    with patch("src.gitlab_api.post_gitlab_note") as mock_post:
         mock_post.return_value = {"id": 123}
         result = stage.execute(context)
 

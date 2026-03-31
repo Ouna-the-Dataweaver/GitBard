@@ -4,7 +4,10 @@ Webhook-driven pipeline system for AI-powered code review on GitLab Merge Reques
 
 ## Current State
 
-**Pipeline architecture is in place.** The system receives webhooks, detects commands (`/oc_review`, `/oc_ask`, `/oc_test`), and executes multi-stage pipelines. However, **OpenCode agent integration is not yet implemented** - the `AgentExecutorStage` currently returns placeholder results.
+**Pipeline architecture is in place.** The system receives note webhooks, detects slash commands and bot mentions, and replies back into GitLab. Command execution is partially implemented:
+- `/oc_review` and `/oc_ask` run through the pipeline, but the final answer still comes from the placeholder `AgentExecutorStage`.
+- `/oc_test` uses the real `opencode` CLI path, so it is the only command with non-placeholder agent execution today.
+- `@nid-bugbard` mention pings now trigger a simple confirmation reply so you can verify delivery end to end.
 
 ## Architecture
 
@@ -12,7 +15,7 @@ Webhook-driven pipeline system for AI-powered code review on GitLab Merge Reques
 oc_hooks/
 ├── app.py                      # FastAPI webhook handler (async → sync bridge)
 ├── src/
-│   ├── app_old.py              # Original app (for post_gitlab_note helper)
+│   ├── gitlab_api.py           # Shared GitLab note helpers
 │   └── pipelines/
 │       ├── base.py             # Pipeline, Stage, Context, Result classes
 │       ├── registry.py         # Command detection and pipeline factory
@@ -30,11 +33,12 @@ oc_hooks/
 └── tests/                      # Unit tests (13 passing)
 ```
 
-## Commands
+## Triggers
 
-- `/oc_review` - Review code in the merge request
-- `/oc_ask` - Answer questions about the code
-- `/oc_test` - Run tests or analyze test coverage
+- `@nid-bugbard` - Replies with a simple "ping received" message to prove webhook delivery works.
+- `/oc_review` - Pipeline works, but the final review text is still placeholder output.
+- `/oc_ask` - Pipeline works, but the final answer text is still placeholder output.
+- `/oc_test` - Runs the `opencode` CLI and posts its response back to the thread.
 
 ## Running
 
@@ -50,16 +54,9 @@ uv run uvicorn app:app --reload --host 0.0.0.0 --port 8585
 
 ## Known Issues
 
-### Recursive Webhook Loop (Hack Fix)
+### Recursive Webhook Loop
 
-**Problem:** When the bot posts a note with results, GitLab sends another webhook event, triggering the pipeline again → infinite loop.
-
-**Current Hack Fix:** The `HookResolverStage` filters out notes starting with "🤖 OpenCode".
-
-**Real Fix (TODO):** When using a dedicated bot account, filter by `user_id` instead of message content. This requires:
-1. A GitLab bot account with its own PAT
-2. Checking `payload.get("user_id")` against the bot's user ID
-3. Removing the "🤖 OpenCode" string check
+Bot-authored notes are ignored by comparing the webhook `user.username` with `GITLAB_USER`. The older message-prefix hack is still kept in the pipeline stage as a secondary guard.
 
 ### OpenCode Agent Integration
 
@@ -79,6 +76,9 @@ This needs to be replaced with actual OpenCode agent invocation.
 1. Configure `.env`:
    - `GITLAB_URL` - GitLab instance URL
    - `GITLAB_PAT` - Personal Access Token
+   - `GITLAB_USER` - GitLab username that will be mentioned, for example `nid-bugbard`
+   - `OPENCODE_MODEL` - OpenCode model id, defaults to `minimax/MiniMax-M2.1`
+   - `OPENCODE_AGENT` - OpenCode agent name, defaults to `Build`
    - `HOST`/`PORT` - Server binding
 
 2. Add webhook in GitLab project:

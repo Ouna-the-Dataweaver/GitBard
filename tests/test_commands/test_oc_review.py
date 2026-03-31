@@ -1,7 +1,8 @@
-import pytest
 from src.pipelines.commands.oc_review import ReviewCommand
 from src.pipelines.commands.oc_ask import AskCommand
 from src.pipelines.commands.oc_test import TestCommand
+from src.pipelines.stages.issue_context_fetcher import IssueContextFetcherStage
+from src.pipelines.stages.opencode_integration import OpencodeIntegrationStage
 
 
 def test_review_command():
@@ -19,7 +20,9 @@ def test_ask_command():
     assert cmd.trigger_pattern == "/oc_ask"
     pipeline = cmd.get_pipeline()
     assert pipeline.name == "oc_ask"
-    assert len(pipeline.stages) == 5
+    assert len(pipeline.stages) == 6
+    assert isinstance(pipeline.stages[3], IssueContextFetcherStage)
+    assert isinstance(pipeline.stages[4], OpencodeIntegrationStage)
 
 
 def test_test_command():
@@ -28,4 +31,4 @@ def test_test_command():
     assert cmd.trigger_pattern == "/oc_test"
     pipeline = cmd.get_pipeline()
     assert pipeline.name == "oc_test"
-    assert len(pipeline.stages) == 5
+    assert len(pipeline.stages) == 6

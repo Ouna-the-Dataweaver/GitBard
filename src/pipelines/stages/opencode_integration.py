@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 class OpencodeIntegrationStage(Stage):
     """Run opencode with JSON output and capture reply."""
 
-    def __init__(self, model: str = "minimax/MiniMax-M2.1", agent: str = "Build"):
-        self.model = model
-        self.agent = agent
+    def __init__(self, model: str | None = None, agent: str | None = None):
+        self.model = model or os.getenv("OPENCODE_MODEL", "minimax/MiniMax-M2.1")
+        self.agent = agent or os.getenv("OPENCODE_AGENT", "Build")
 
     def _execute(self, context: PipelineContext) -> StageResult:
         repo_dir = context.local_context_path
@@ -22,11 +22,7 @@ class OpencodeIntegrationStage(Stage):
             raise ValueError("No local_context_path available for opencode")
 
         question = self._extract_question(context)
-        prompt = f"Answer this GitLab thread question:\n\n{question}".strip()
-        issue_context_path = context.metadata.get("issue_context_path")
-        if issue_context_path:
-            relative_path = os.path.relpath(issue_context_path, repo_dir)
-            prompt = f"{prompt}\n\nUse the issue thread context in {relative_path}."
+        prompt = self._build_prompt(context, repo_dir, question)
 
         result = subprocess.run(
             [
@@ -83,6 +79,39 @@ class OpencodeIntegrationStage(Stage):
         trigger = context.metadata.get("trigger_pattern", "")
         question = note_body.replace(trigger, "").strip()
         return question or "No additional question provided."
+
+    def _build_prompt(
+        self, context: PipelineContext, repo_dir: str, question: str
+    ) -> str:
+        noteable_type = context.metadata.get("noteable_type") or "thread"
+        prompt = [
+            f"Answer this GitLab {noteable_type.lower()} question:",
+            "",
+            question,
+            "",
+            "Work inside the checked out repository.",
+        ]
+
+        thread_context_path = context.metadata.get("thread_context_path")
+        if thread_context_path:
+            relative_path = os.path.relpath(thread_context_path, repo_dir)
+            prompt.append(f"Use the thread context in {relative_path}.")
+
+        snapshot = context.code_snapshot or {}
+        source_branch = snapshot.get("source_branch")
+        target_branch = snapshot.get("target_branch")
+        if source_branch or target_branch:
+            prompt.append(
+                f"Current review scope is {source_branch or '?'} -> {target_branch or '?'}."
+            )
+
+        prompt.extend(
+            [
+                "If this is a merge request, summarize the MR first and then provide a concise review.",
+                "Base the answer on the local repository and the provided GitLab context file.",
+            ]
+        )
+        return "\n\n".join(part for part in prompt if part)
 
     def _extract_text_events(self, lines: List[str]) -> str:
         chunks: List[str] = []

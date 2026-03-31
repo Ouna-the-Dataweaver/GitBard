@@ -17,9 +17,6 @@ if [ ! -d ".venv" ]; then
     uv venv
 fi
 
-# Activate virtual environment
-source .venv/bin/activate
-
 # Check for .env file
 if [ ! -f ".env" ]; then
     echo "Warning: .env file not found!"
@@ -30,7 +27,9 @@ if [ ! -f ".env" ]; then
 fi
 
 # Export variables from .env
-export $(cat .env | grep -v '^#' | xargs)
+set -a
+source .env
+set +a
 export HOST="${HOST:-0.0.0.0}"
 export PORT="${PORT:-8585}"
 
@@ -45,4 +44,4 @@ echo "Starting server on ${HOST}:${PORT}..."
 echo "Press Ctrl+C to stop"
 echo "=========================================="
 
-exec uvicorn app:app --host "${HOST}" --port "${PORT}" --reload
+exec uv run uvicorn app:app --host "${HOST}" --port "${PORT}" --reload
