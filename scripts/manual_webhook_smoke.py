@@ -1,6 +1,8 @@
-import requests
 import json
 import os
+from typing import Any
+
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -67,47 +69,50 @@ sample_note_payload = {
 }
 
 
-def test_health():
-    """Test health endpoint"""
+def _print_response(name: str, response: requests.Response) -> None:
+    print(f"\n=== {name} ===")
+    print(f"Status: {response.status_code}")
+    print(f"Response: {json.dumps(response.json(), indent=2)}")
+
+
+def test_health() -> bool:
+    """Smoke test the health endpoint."""
     print("\n=== Testing Health Endpoint ===")
     try:
         response = requests.get(f"{BASE_URL}/health")
-        print(f"Status: {response.status_code}")
-        print(f"Response: {json.dumps(response.json(), indent=2)}")
+        _print_response("Testing Health Endpoint", response)
         return response.status_code == 200
-    except Exception as e:
-        print(f"Error: {e}")
+    except Exception as exc:
+        print(f"Error: {exc}")
         return False
 
 
-def test_mr_webhook():
-    """Test merge request webhook"""
-    print("\n=== Testing Merge Request Webhook ===")
+def test_mr_webhook() -> bool:
+    """Smoke test the merge request webhook."""
     try:
         response = requests.post(f"{BASE_URL}/webhook", json=sample_mr_payload)
-        print(f"Status: {response.status_code}")
-        print(f"Response: {json.dumps(response.json(), indent=2)}")
+        _print_response("Testing Merge Request Webhook", response)
         return response.status_code == 200
-    except Exception as e:
-        print(f"Error: {e}")
+    except Exception as exc:
+        print(f"Error: {exc}")
         return False
 
 
-def test_note_webhook():
-    """Test note (comment) webhook"""
-    print("\n=== Testing Note Webhook ===")
+def test_note_webhook() -> bool:
+    """Smoke test the note webhook."""
     try:
         response = requests.post(f"{BASE_URL}/webhook", json=sample_note_payload)
-        print(f"Status: {response.status_code}")
-        print(f"Response: {json.dumps(response.json(), indent=2)}")
+        _print_response("Testing Note Webhook", response)
         return response.status_code == 200
-    except Exception as e:
-        print(f"Error: {e}")
+    except Exception as exc:
+        print(f"Error: {exc}")
         return False
 
 
-def post_gitlab_comment(project_id, mr_iid, comment_text, gitlab_token):
-    """Post a comment to a GitLab merge request"""
+def post_gitlab_comment(
+    project_id: int, mr_iid: int, comment_text: str, gitlab_token: str
+) -> dict[str, Any]:
+    """Post a comment to a GitLab merge request."""
     gitlab_url = os.environ.get(
         "GITLAB_URL", "https://nid-gitlab.ad.speechpro.com"
     ).rstrip("/")
@@ -120,8 +125,8 @@ def post_gitlab_comment(project_id, mr_iid, comment_text, gitlab_token):
     return resp.json()
 
 
-def test_gitlab_comment():
-    """Test posting a comment to GitLab MR"""
+def test_gitlab_comment() -> bool:
+    """Smoke test posting a comment to GitLab."""
     gitlab_token = os.environ.get("GITLAB_PAT", "")
     if not gitlab_token:
         print("GITLAB_PAT not set in environment")
@@ -134,12 +139,13 @@ def test_gitlab_comment():
         comment_text = "trigger OK"
 
         resp_json = post_gitlab_comment(project_id, mr_iid, comment_text, gitlab_token)
-        print(f"Status: 201")
+        print("\n=== Testing GitLab Comment Post ===")
+        print("Status: 201")
         print(f"Response: {json.dumps(resp_json, indent=2)}")
         print(f"Posted comment ID: {resp_json['id']}")
         return True
-    except Exception as e:
-        print(f"Error: {e}")
+    except Exception as exc:
+        print(f"Error: {exc}")
         return False
 
 

@@ -1,9 +1,15 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
 import logging
 import os
+
 from dotenv import load_dotenv
-from src.gitlab_api import extract_noteable_iid, is_self_authored_note, post_gitlab_note
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, RedirectResponse
+
+from src.gitlab_api import (
+    extract_noteable_iid,
+    is_self_authored_note,
+    post_gitlab_note,
+)
 from src.pipelines.registry import contains_user_mention, detect_command
 
 load_dotenv()
@@ -31,6 +37,41 @@ def build_mention_reply(bot_username: str) -> str:
     return (
         f"Ping received. Mention delivery works and I saw {mention}.\n\n"
         "Context-aware answers are not wired yet, but the webhook can already reply to mentions."
+    )
+
+
+async def _run_detected_command(payload: dict, command_name: str, command) -> JSONResponse:
+    from src.pipelines.base import PipelineContext
+    import asyncio
+
+    context = PipelineContext(webhook_payload=payload)
+    pipeline = command.get_pipeline()
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, pipeline.execute, context)
+
+    if result.success:
+        return JSONResponse({"status": "completed", "command": command_name})
+
+    return JSONResponse({"status": "error", "error": str(result.error)}, status_code=500)
+
+
+def _post_mention_reply(payload: dict) -> JSONResponse:
+    project_id = payload.get("project", {}).get("id")
+    noteable_type = payload.get("object_attributes", {}).get("noteable_type")
+    noteable_iid = extract_noteable_iid(payload)
+    note_response = post_gitlab_note(
+        project_id,
+        noteable_type,
+        noteable_iid,
+        build_mention_reply(GITLAB_USER),
+        project=payload.get("project"),
+    )
+    if note_response:
+        return JSONResponse({"status": "completed", "trigger": "mention"})
+
+    return JSONResponse(
+        {"status": "error", "message": "Failed to post mention reply"},
+        status_code=502,
     )
 
 
@@ -74,43 +115,16 @@ async def gitlab_webhook(request: Request):
 
         command = detect_command(note)
         if command:
-            from src.pipelines.base import PipelineContext
-            import asyncio
-
-            context = PipelineContext(webhook_payload=payload)
-            pipeline = command.get_pipeline()
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(None, pipeline.execute, context)
-
-            if result.success:
-                return JSONResponse({"status": "completed", "command": command.name})
-            return JSONResponse(
-                {"status": "error", "error": str(result.error)}, status_code=500
-            )
+            return await _run_detected_command(payload, command.name, command)
 
         if contains_user_mention(note, GITLAB_USER):
-            project_id = payload.get("project", {}).get("id")
-            noteable_type = payload.get("object_attributes", {}).get("noteable_type")
-            noteable_iid = extract_noteable_iid(payload)
-            note_response = post_gitlab_note(
-                project_id,
-                noteable_type,
-                noteable_iid,
-                build_mention_reply(GITLAB_USER),
-                project=payload.get("project"),
-            )
-            if note_response:
-                return JSONResponse({"status": "completed", "trigger": "mention"})
-            return JSONResponse(
-                {"status": "error", "message": "Failed to post mention reply"},
-                status_code=502,
-            )
+            return _post_mention_reply(payload)
 
         return JSONResponse({"status": "ignored"})
 
-    except Exception as e:
-        logger.error(f"Error processing webhook: {e}", exc_info=True)
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    except Exception as exc:
+        logger.exception("Error processing webhook")
+        return JSONResponse({"status": "error", "message": str(exc)}, status_code=500)
 
 
 if __name__ == "__main__":

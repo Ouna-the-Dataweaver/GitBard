@@ -90,3 +90,6 @@ This needs to be replaced with actual OpenCode agent invocation.
 ```bash
 uv run pytest tests/ -v
 ```
+
+For an ad hoc local smoke test against a running server, use
+`scripts/manual_webhook_smoke.py`.
