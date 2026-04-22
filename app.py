@@ -10,6 +10,7 @@ from src.gitlab_api import (
     is_self_authored_note,
     post_gitlab_note,
 )
+from src.pipelines.commands.oc_review import ReviewCommand
 from src.pipelines.registry import contains_user_mention, detect_command
 
 load_dotenv()
@@ -40,11 +41,29 @@ def build_mention_reply(bot_username: str) -> str:
     )
 
 
-async def _run_detected_command(payload: dict, command_name: str, command) -> JSONResponse:
+async def _run_detected_command(
+    payload: dict,
+    command_name: str,
+    command,
+    trigger_text: str | None = None,
+    display_trigger: str | None = None,
+) -> JSONResponse:
     from src.pipelines.base import PipelineContext
     import asyncio
 
     context = PipelineContext(webhook_payload=payload)
+    if trigger_text:
+        context.command = command_name
+        context.metadata["noteable_type"] = payload.get("object_attributes", {}).get(
+            "noteable_type"
+        )
+        context.metadata["note_body"] = payload.get("object_attributes", {}).get(
+            "note", ""
+        )
+        context.metadata["trigger_pattern"] = trigger_text
+        if display_trigger:
+            context.metadata["display_trigger"] = display_trigger
+
     pipeline = command.get_pipeline()
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, pipeline.execute, context)
@@ -72,6 +91,18 @@ def _post_mention_reply(payload: dict) -> JSONResponse:
     return JSONResponse(
         {"status": "error", "message": "Failed to post mention reply"},
         status_code=502,
+    )
+
+
+async def _run_mention_review(payload: dict) -> JSONResponse:
+    mention = f"@{GITLAB_USER}" if GITLAB_USER else "@bot"
+    review_command = ReviewCommand()
+    return await _run_detected_command(
+        payload,
+        review_command.name,
+        review_command,
+        trigger_text=mention,
+        display_trigger=review_command.trigger_pattern,
     )
 
 
@@ -118,6 +149,9 @@ async def gitlab_webhook(request: Request):
             return await _run_detected_command(payload, command.name, command)
 
         if contains_user_mention(note, GITLAB_USER):
+            noteable_type = payload.get("object_attributes", {}).get("noteable_type")
+            if noteable_type == "MergeRequest":
+                return await _run_mention_review(payload)
             return _post_mention_reply(payload)
 
         return JSONResponse({"status": "ignored"})

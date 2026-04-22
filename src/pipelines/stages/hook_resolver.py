@@ -21,18 +21,29 @@ class HookResolverStage(Stage):
             logger.info("Skipping note posted by ourselves")
             return StageResult(context=context, should_stop=True)
 
-        from ..registry import detect_command
+        trigger_pattern = context.metadata.get("trigger_pattern")
+        display_trigger = context.metadata.get("display_trigger")
 
-        command = detect_command(note)
+        if context.command:
+            command_name = context.command
+        else:
+            from ..registry import detect_command
 
-        if not command:
-            logger.info(f"No command detected in note: {note}")
-            return StageResult(context=context, should_stop=True)
+            command = detect_command(note)
 
-        context.command = command.name
+            if not command:
+                logger.info(f"No command detected in note: {note}")
+                return StageResult(context=context, should_stop=True)
+
+            command_name = command.name
+            trigger_pattern = command.trigger_pattern
+            display_trigger = command.trigger_pattern
+
+        context.command = command_name
         context.metadata["noteable_type"] = noteable_type
         context.metadata["note_body"] = note
-        context.metadata["trigger_pattern"] = command.trigger_pattern
+        context.metadata["trigger_pattern"] = trigger_pattern or command_name
+        context.metadata["display_trigger"] = display_trigger or trigger_pattern or command_name
 
         project_id = payload.get("project", {}).get("id")
         noteable_iid = extract_noteable_iid(payload)
@@ -41,7 +52,8 @@ class HookResolverStage(Stage):
             project_id,
             noteable_type,
             noteable_iid,
-            f"🤖 OpenCode started working on `{command.trigger_pattern}`...",
+            "🤖 OpenCode started working on "
+            f"`{context.metadata['display_trigger']}`...",
             project=payload.get("project"),
         )
 

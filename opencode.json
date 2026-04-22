@@ -1,6 +1,14 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "agent": {
+    "gitlab-prepare": {
+      "description": "Prepares a checked out repository for analysis without editing tracked files.",
+      "prompt": "{file:./prompts/gitlab-prepare.md}",
+      "tools": {
+        "write": false,
+        "edit": false
+      }
+    },
     "gitlab-review": {
       "description": "Reviews merge requests for correctness, risks, and test gaps.",
       "prompt": "{file:./prompts/gitlab-review.md}",

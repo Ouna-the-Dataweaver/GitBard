@@ -4,10 +4,16 @@ from .commands.base import Command
 from .commands.oc_review import ReviewCommand
 from .commands.oc_ask import AskCommand
 from .commands.oc_test import TestCommand
+from .commands.oc_deeptest import DeepTestCommand
 from .base import Pipeline
 
 
-COMMANDS: List[Command] = [ReviewCommand(), AskCommand(), TestCommand()]
+COMMANDS: List[Command] = [
+    ReviewCommand(),
+    AskCommand(),
+    TestCommand(),
+    DeepTestCommand(),
+]
 
 
 def detect_command(text: str) -> Optional[Command]:

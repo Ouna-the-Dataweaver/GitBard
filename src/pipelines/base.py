@@ -6,6 +6,21 @@ import shutil
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class WorkspaceConfig:
+    """Workspace acquisition policy for a pipeline run."""
+
+    mode: str = "fresh_clone"
+    cleanup_required: bool = True
+
+
+@dataclass(frozen=True)
+class PreparationConfig:
+    """Optional repository preparation steps."""
+
+    routes: tuple[str, ...] = ()
+
+
 @dataclass
 class PipelineContext:
     """Shared context passed through all pipeline stages"""
@@ -15,6 +30,7 @@ class PipelineContext:
     project_info: Optional[Dict[str, Any]] = None
     code_snapshot: Optional[Dict[str, Any]] = None
     local_context_path: Optional[str] = None
+    workspace_cleanup_required: bool = False
     agent_result: Optional["AgentResult"] = None
     gitlab_note_id: Optional[int] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -91,5 +107,5 @@ class Pipeline:
         finally:
             for attr_name in ["local_context_path"]:
                 path = getattr(context, attr_name, None)
-                if path:
+                if path and context.workspace_cleanup_required:
                     shutil.rmtree(path, ignore_errors=True)
