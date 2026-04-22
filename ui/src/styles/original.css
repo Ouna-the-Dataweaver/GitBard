@@ -1,0 +1,225 @@
+:root {
+  color-scheme: dark;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.v0-app {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  background:
+    radial-gradient(circle at top left, rgba(20, 184, 166, 0.18), transparent 28%),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.16), transparent 24%),
+    #09111f;
+  color: #e5eefc;
+}
+
+.v0-loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+}
+
+.v0-sidebar {
+  border-right: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(8, 15, 28, 0.82);
+  backdrop-filter: blur(16px);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.v0-sidebar-header h1,
+.v0-panel-header h2,
+.v0-form-section h3,
+.v0-feedback-card h3 {
+  margin: 0;
+}
+
+.v0-muted,
+.v0-pipeline-card p,
+.v0-summary-card p {
+  color: #94a3b8;
+}
+
+.v0-eyebrow,
+.v0-summary-label {
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  color: #7dd3fc;
+}
+
+.v0-primary-button,
+.v0-pipeline-card {
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  background: rgba(15, 23, 42, 0.78);
+  color: inherit;
+  border-radius: 16px;
+}
+
+.v0-primary-button {
+  padding: 12px 14px;
+}
+
+.v0-pipeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+
+.v0-pipeline-card {
+  text-align: left;
+  padding: 14px;
+}
+
+.v0-pipeline-card.v0-selected {
+  border-color: rgba(45, 212, 191, 0.6);
+  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.24);
+}
+
+.v0-pipeline-card-row,
+.v0-panel-header,
+.v0-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.v0-pipeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #cbd5e1;
+  font-size: 0.84rem;
+}
+
+.v0-status-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.76rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.v0-status-pill.v0-on {
+  background: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+}
+
+.v0-status-pill.v0-off {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fda4af;
+}
+
+.v0-main-panel {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.v0-panel {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 24px;
+  padding: 20px;
+  backdrop-filter: blur(14px);
+}
+
+.v0-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.v0-form-section,
+.v0-feedback-card,
+.v0-summary-card {
+  background: rgba(2, 8, 23, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 18px;
+  padding: 16px;
+}
+
+.v0-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.v0-form-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.v0-form-section input,
+.v0-form-section select,
+.v0-form-section textarea {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.92);
+  color: inherit;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.v0-inline-toggle {
+  flex-direction: row !important;
+  align-items: center;
+}
+
+.v0-inline-toggle input {
+  width: auto;
+}
+
+.v0-preview-summary,
+.v0-feedback-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.v0-feedback-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.v0-flow-panel {
+  height: 360px;
+  margin: 18px 0;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.v0-feedback-card ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 1100px) {
+  .v0-app {
+    grid-template-columns: 1fr;
+  }
+
+  .v0-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  }
+
+  .v0-section-grid,
+  .v0-preview-summary,
+  .v0-feedback-grid {
+    grid-template-columns: 1fr;
+  }
+}
