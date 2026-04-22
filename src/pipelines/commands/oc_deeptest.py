@@ -18,6 +18,30 @@ class DeepTestCommand(Command):
     def trigger_pattern(self) -> str:
         return "/oc_deeptest"
 
+    @property
+    def description(self) -> str:
+        return "Runs preparation before the main OpenCode execution."
+
+    @property
+    def agent_name(self) -> str:
+        return "gitlab-prepare"
+
+    @property
+    def timeout_seconds(self) -> int:
+        return 3600
+
+    @property
+    def enable_repo_hook(self) -> bool:
+        return True
+
+    @property
+    def enable_opencode_preparation(self) -> bool:
+        return True
+
+    @property
+    def allow_dependency_install(self) -> bool:
+        return True
+
     def get_pipeline(self) -> Pipeline:
         workspace_config = WorkspaceConfig(mode="fresh_clone", cleanup_required=True)
         preparation_config = PreparationConfig(routes=("repo_hook", "opencode"))

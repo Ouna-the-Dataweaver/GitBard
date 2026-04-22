@@ -17,6 +17,10 @@ class AskCommand(Command):
     def trigger_pattern(self) -> str:
         return "/oc_ask"
 
+    @property
+    def description(self) -> str:
+        return "Runs the opencode CLI and posts its response back to the thread."
+
     def get_pipeline(self) -> Pipeline:
         workspace_config = WorkspaceConfig(mode="fresh_clone", cleanup_required=True)
         return Pipeline(

@@ -17,6 +17,10 @@ class ReviewCommand(Command):
     def trigger_pattern(self) -> str:
         return "/oc_review"
 
+    @property
+    def description(self) -> str:
+        return "Runs the review agent when a merge request note requests review."
+
     def get_pipeline(self) -> Pipeline:
         workspace_config = WorkspaceConfig(mode="fresh_clone", cleanup_required=True)
         return Pipeline(

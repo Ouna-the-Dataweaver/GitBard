@@ -17,6 +17,10 @@ class TestCommand(Command):
     def trigger_pattern(self) -> str:
         return "/oc_test"
 
+    @property
+    def description(self) -> str:
+        return "Uses the same real opencode CLI path for ad hoc testing."
+
     def get_pipeline(self) -> Pipeline:
         workspace_config = WorkspaceConfig(mode="fresh_clone", cleanup_required=True)
         return Pipeline(
