@@ -1,15 +1,18 @@
 import logging
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.gitlab_api import (
     extract_noteable_iid,
     is_self_authored_note,
     post_gitlab_note,
 )
+from src.admin_api import router as admin_router
 from src.pipelines.commands.oc_review import ReviewCommand
 from src.pipelines.registry import contains_user_mention, detect_command
 
@@ -31,6 +34,14 @@ GITLAB_PAT = os.getenv("GITLAB_PAT", "")
 GITLAB_USER = os.getenv("GITLAB_USER", "").strip().lstrip("@")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8585"))
+BASE_DIR = Path(__file__).resolve().parent
+UI_DIST_DIR = BASE_DIR / "ui" / "dist"
+UI_ASSETS_DIR = UI_DIST_DIR / "assets"
+
+app.include_router(admin_router)
+
+if UI_ASSETS_DIR.exists():
+    app.mount("/admin/assets", StaticFiles(directory=str(UI_ASSETS_DIR)), name="admin-assets")
 
 
 def build_mention_reply(bot_username: str) -> str:
@@ -104,6 +115,59 @@ async def _run_mention_review(payload: dict) -> JSONResponse:
         trigger_text=mention,
         display_trigger=review_command.trigger_pattern,
     )
+
+
+def _admin_fallback_html() -> str:
+    return """
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GitBard Admin UI</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 0;
+        padding: 32px;
+        background: #111827;
+        color: #f9fafb;
+      }
+      .panel {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 24px;
+        border-radius: 16px;
+        background: #1f2937;
+        border: 1px solid #374151;
+      }
+      code {
+        background: #111827;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+      a { color: #93c5fd; }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <h1>Admin UI build not found</h1>
+      <p>The TypeScript frontend has been scaffolded under <code>ui/</code>, but the production bundle is not built yet.</p>
+      <p>Run <code>cd ui && npm install && npm run build</code> to serve the built UI from FastAPI, or <code>npm run dev</code> for frontend development.</p>
+      <p>The placeholder admin API is already available at <a href="/api/admin/metadata">/api/admin/metadata</a>.</p>
+    </div>
+  </body>
+</html>
+""".strip()
+
+
+@app.get("/admin")
+@app.get("/admin/{full_path:path}")
+async def admin_ui(full_path: str = ""):
+    index_path = UI_DIST_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    return HTMLResponse(_admin_fallback_html())
 
 
 @app.get("/")
