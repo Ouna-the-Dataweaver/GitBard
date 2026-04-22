@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from src.pipelines.base import Pipeline, Stage, StageResult, PipelineContext
 
@@ -47,3 +49,38 @@ def test_pipeline_should_stop():
 
     assert result.success
     assert context.metadata.get("final_executed") is None
+
+
+def test_pipeline_cleans_up_workspace_when_requested(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "marker.txt").write_text("x", encoding="utf-8")
+
+    context = PipelineContext(
+        webhook_payload={},
+        local_context_path=str(workspace),
+        workspace_cleanup_required=True,
+    )
+    pipeline = Pipeline(name="test", stages=[MockStage()])
+
+    result = pipeline.execute(context)
+
+    assert result.success
+    assert not Path(context.local_context_path).exists()
+
+
+def test_pipeline_keeps_workspace_when_cleanup_not_requested(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    context = PipelineContext(
+        webhook_payload={},
+        local_context_path=str(workspace),
+        workspace_cleanup_required=False,
+    )
+    pipeline = Pipeline(name="test", stages=[MockStage()])
+
+    result = pipeline.execute(context)
+
+    assert result.success
+    assert Path(context.local_context_path).exists()

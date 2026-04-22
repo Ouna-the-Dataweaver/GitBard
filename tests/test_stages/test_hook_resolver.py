@@ -17,12 +17,44 @@ def test_hook_resolver_detects_command():
     context = PipelineContext(webhook_payload=payload)
     stage = HookResolverStage()
 
-    with patch("src.gitlab_api.post_gitlab_note") as mock_post:
+    with patch("src.pipelines.stages.hook_resolver.post_gitlab_note") as mock_post:
         mock_post.return_value = {"id": 123}
         result = stage.execute(context)
 
     assert not result.should_stop
     assert context.command == "oc_review"
+
+
+def test_hook_resolver_uses_preseeded_command(monkeypatch):
+    payload = {
+        "object_kind": "note",
+        "object_attributes": {
+            "note": "@nid-bugbard focus on auth changes",
+            "noteable_type": "MergeRequest",
+        },
+        "project": {"id": 1},
+        "merge_request": {"iid": 42},
+    }
+    context = PipelineContext(
+        webhook_payload=payload,
+        command="oc_review",
+        metadata={
+            "trigger_pattern": "@nid-bugbard",
+            "display_trigger": "/oc_review",
+        },
+    )
+    stage = HookResolverStage()
+
+    with patch("src.pipelines.stages.hook_resolver.post_gitlab_note") as mock_post:
+        mock_post.return_value = {"id": 123}
+        result = stage.execute(context)
+
+    assert not result.should_stop
+    assert context.command == "oc_review"
+    assert context.metadata["note_body"] == "@nid-bugbard focus on auth changes"
+    assert context.metadata["trigger_pattern"] == "@nid-bugbard"
+    assert context.metadata["display_trigger"] == "/oc_review"
+    mock_post.assert_called_once()
 
 
 def test_hook_resolver_ignores_non_note():
