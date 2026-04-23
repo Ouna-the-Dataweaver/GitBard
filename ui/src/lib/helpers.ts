@@ -13,7 +13,50 @@ export function commaSeparated(value: string): string[] {
     .filter(Boolean);
 }
 
-export function buildFlow(preview: PreviewResponse | null): { nodes: Node[]; edges: Edge[] } {
+export const STAGE_CATALOG: Record<
+  string,
+  { name: string; description: string; section: string | null }
+> = {
+  HookResolverStage: {
+    name: "Hook Resolver",
+    description: "Detect trigger commands",
+    section: "preparation",
+  },
+  SnapshotResolverStage: {
+    name: "Snapshot Resolver",
+    description: "Resolve code snapshot",
+    section: "filters",
+  },
+  WorkspaceAcquisitionStage: {
+    name: "Workspace",
+    description: "Clone workspace",
+    section: "workspace",
+  },
+  IssueContextFetcherStage: {
+    name: "Context Fetcher",
+    description: "Fetch issue context",
+    section: "trigger",
+  },
+  WorkspacePreparationStage: {
+    name: "Preparation",
+    description: "Prepare workspace",
+    section: "preparation",
+  },
+  OpencodeIntegrationStage: {
+    name: "OpenCode",
+    description: "Run AI agent",
+    section: "execution",
+  },
+  NoteUpdaterStage: {
+    name: "Note Updater",
+    description: "Post results",
+    section: "output",
+  },
+};
+
+export function buildFlow(
+  preview: PreviewResponse | null,
+): { nodes: Node[]; edges: Edge[] } {
   const stages = preview?.compiled_pipeline.stages ?? [];
   const nodes: Node[] = stages.map((stage, index) => ({
     id: stage,
@@ -39,81 +82,73 @@ export function buildEditableFlow(
     return { nodes: [], edges: [] };
   }
 
-  const compiledStages = preview.compiled_pipeline.stages;
+  const stages = draft.stages ?? preview.compiled_pipeline.stages;
 
-  const sections: {
-    key: string;
-    label: string;
-    stageFilter: (s: string) => boolean;
-    summary: string;
-  }[] = [
-    {
-      key: "basics",
+  const NODE_Y = 120;
+  const INSERT_Y = 143;
+  const NODE_W = 220;
+  const INSERT_SIZE = 26;
+  const GAP = 30;
+
+  const nodes: Node[] = [];
+  const edges: Edge[] = [];
+  let x = 60;
+
+  nodes.push({
+    id: "basics",
+    position: { x, y: NODE_Y },
+    data: {
       label: "Pipeline",
-      stageFilter: () => false,
+      section: "basics",
+      stages: [],
       summary: draft.name,
     },
-    {
-      key: "trigger",
-      label: "Trigger",
-      stageFilter: (s) => s === "IssueContextFetcherStage",
-      summary: `${draft.trigger.type} / ${draft.trigger.scope}`,
-    },
-    {
-      key: "filters",
-      label: "Filters",
-      stageFilter: (s) => s === "SnapshotResolverStage",
-      summary: `${draft.filters.projectAllowlist.length} allowlisted`,
-    },
-    {
-      key: "workspace",
-      label: "Workspace",
-      stageFilter: (s) => s === "WorkspaceAcquisitionStage",
-      summary: draft.workspace.mode,
-    },
-    {
-      key: "preparation",
-      label: "Preparation",
-      stageFilter: (s) =>
-        ["HookResolverStage", "WorkspacePreparationStage"].includes(s),
-      summary: draft.preparation.enableOpencodePreparation ? "Enabled" : "Disabled",
-    },
-    {
-      key: "execution",
-      label: "Execution",
-      stageFilter: (s) => s === "OpencodeIntegrationStage",
-      summary: draft.execution.agentName,
-    },
-    {
-      key: "output",
-      label: "Output",
-      stageFilter: (s) => s === "NoteUpdaterStage",
-      summary: draft.output.postMode,
-    },
-  ];
-
-  const nodes: Node[] = sections.map((sec, index) => {
-    const stages = compiledStages.filter(sec.stageFilter);
-    return {
-      id: sec.key,
-      position: { x: 60 + index * 260, y: 120 },
-      data: {
-        label: sec.label,
-        section: sec.key,
-        stages,
-        summary: sec.summary,
-      },
-      type: "pipelineNode",
-    };
+    type: "pipelineNode",
   });
 
-  const edges: Edge[] = sections.slice(1).map((sec, index) => ({
-    id: `${sections[index].key}-${sec.key}`,
-    source: sections[index].key,
-    target: sec.key,
-    type: "smoothstep",
-    markerEnd: { type: MarkerType.ArrowClosed },
-  }));
+  let prevId = "basics";
+  x += NODE_W + GAP;
+
+  for (let i = 0; i <= stages.length; i++) {
+    const insertId = `insert-${i}`;
+    nodes.push({
+      id: insertId,
+      position: { x, y: INSERT_Y },
+      data: { isInsert: true, insertAtIndex: i },
+      type: "insertNode",
+    });
+    x += INSERT_SIZE + GAP;
+
+    if (i < stages.length) {
+      const stage = stages[i];
+      const info = STAGE_CATALOG[stage];
+      const stageId = `stage-${i}`;
+
+      nodes.push({
+        id: stageId,
+        position: { x, y: NODE_Y },
+        data: {
+          label: info?.name ?? stage.replace("Stage", ""),
+          section: info?.section ?? null,
+          stages: [],
+          summary: info?.description ?? "",
+          stageIndex: i,
+        },
+        type: "pipelineNode",
+      });
+
+      edges.push({
+        id: `${prevId}-${stageId}`,
+        source: prevId,
+        target: stageId,
+        type: "smoothstep",
+        markerEnd: { type: MarkerType.ArrowClosed },
+      });
+
+      prevId = stageId;
+      x += NODE_W + GAP;
+    }
+  }
 
   return { nodes, edges };
 }
