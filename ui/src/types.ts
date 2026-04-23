@@ -63,6 +63,7 @@ export interface PipelineDocument {
     keepEventsJsonl: boolean;
     keepRenderedReplyMarkdown: boolean;
   };
+  stages?: string[];
   updatedAt: string;
 }
 
@@ -75,6 +76,7 @@ export interface MetadataResponse {
   workspace_modes: string[];
   checkout_strategies: string[];
   output_post_modes: Array<"new_note" | "update_progress_note">;
+  available_stages: Array<{ id: string; name: string; description: string }>;
 }
 
 export interface ValidationResponse {
