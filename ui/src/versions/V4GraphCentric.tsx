@@ -50,8 +50,57 @@ function PipelineNode({
   );
 }
 
+function InsertNode() {
+  return (
+    <div className="v4-insert-node" title="Add pipeline step" aria-label="Add pipeline step">
+      <span className="v4-insert-cross" aria-hidden="true" />
+    </div>
+  );
+}
+
+function StepPickerModal({
+  stages,
+  onSelect,
+  onClose,
+}: {
+  stages: Array<{ id: string; name: string; description: string }>;
+  onSelect: (stageId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="v4-picker-overlay" onClick={onClose}>
+      <div className="v4-picker" onClick={(e) => e.stopPropagation()}>
+        <div className="v4-picker-header">
+          <h3>Add Pipeline Step</h3>
+          <button
+            className="v4-btn-ghost"
+            type="button"
+            onClick={onClose}
+          >
+            &times;
+          </button>
+        </div>
+        <div className="v4-picker-list">
+          {stages.map((stage) => (
+            <button
+              key={stage.id}
+              type="button"
+              className="v4-picker-item"
+              onClick={() => onSelect(stage.id)}
+            >
+              <div className="v4-picker-item-name">{stage.name}</div>
+              <div className="v4-picker-item-desc">{stage.description}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const nodeTypes = {
   pipelineNode: PipelineNode,
+  insertNode: InsertNode,
 };
 
 const sectionTitles: Record<string, string> = {
@@ -66,6 +115,8 @@ const sectionTitles: Record<string, string> = {
 
 export default function V4GraphCentric() {
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [insertAtIndex, setInsertAtIndex] = useState<number>(-1);
   const {
     metadata,
     pipelines,
@@ -92,12 +143,49 @@ export default function V4GraphCentric() {
   );
 
   const onNodeClick = useCallback(
-    (_event: unknown, node: { data?: { section?: string } }) => {
+    (_event: unknown, node: { data?: { section?: string; isInsert?: boolean; insertAtIndex?: number } }) => {
+      if (node.data?.isInsert) {
+        setInsertAtIndex(node.data.insertAtIndex ?? 0);
+        setPickerOpen(true);
+        return;
+      }
       if (node.data?.section) {
         setSelectedSection(node.data.section);
       }
     },
     [],
+  );
+
+  const handleAddStage = useCallback(
+    (stageId: string) => {
+      if (!draft || !preview) return;
+      const currentStages =
+        draft.stages ?? preview.compiled_pipeline.stages;
+      const newStages = [...currentStages];
+      newStages.splice(insertAtIndex, 0, stageId);
+      updateDraft((c) => {
+        c.stages = newStages;
+        return c;
+      });
+      setPickerOpen(false);
+    },
+    [draft, preview, insertAtIndex, updateDraft],
+  );
+
+  const handleRemoveStage = useCallback(
+    (stageIndex: number) => {
+      if (!draft || !preview) return;
+      const currentStages =
+        draft.stages ?? preview.compiled_pipeline.stages;
+      if (currentStages.length <= 1) return;
+      const newStages = [...currentStages];
+      newStages.splice(stageIndex, 1);
+      updateDraft((c) => {
+        c.stages = newStages;
+        return c;
+      });
+    },
+    [draft, preview, updateDraft],
   );
 
   if (loading && !draft) {
@@ -226,6 +314,13 @@ export default function V4GraphCentric() {
                 <Controls />
                 <Background gap={18} size={1} />
               </ReactFlow>
+              {pickerOpen && metadata && (
+                <StepPickerModal
+                  stages={metadata.available_stages}
+                  onSelect={handleAddStage}
+                  onClose={() => setPickerOpen(false)}
+                />
+              )}
             </div>
 
             <div className="v4-editor">
@@ -261,13 +356,39 @@ export default function V4GraphCentric() {
                 <div className="v4-editor-content">
                   <div className="v4-editor-topbar">
                     <h3>{sectionTitles[selectedSection] ?? selectedSection}</h3>
-                    <button
-                      className="v4-btn-ghost"
-                      type="button"
-                      onClick={() => setSelectedSection(null)}
-                    >
-                      Close
-                    </button>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      {(() => {
+                        const allStages = draft.stages ?? preview?.compiled_pipeline.stages ?? [];
+                        const stageNodesInSameSection = flow.nodes.filter(
+                          (n) =>
+                            n.data?.section === selectedSection &&
+                            n.data?.stageIndex !== undefined,
+                        );
+                        if (stageNodesInSameSection.length > 0 && allStages.length > 1) {
+                          return (
+                            <button
+                              className="v4-btn v4-btn-danger"
+                              type="button"
+                              style={{ fontSize: "0.65rem", padding: "4px 10px" }}
+                              onClick={() => {
+                                const idx = stageNodesInSameSection[0].data.stageIndex;
+                                void handleRemoveStage(idx);
+                              }}
+                            >
+                              Remove Step
+                            </button>
+                          );
+                        }
+                        return null;
+                      })()}
+                      <button
+                        className="v4-btn-ghost"
+                        type="button"
+                        onClick={() => setSelectedSection(null)}
+                      >
+                        Close
+                      </button>
+                    </div>
                   </div>
 
                   {selectedSection === "basics" && (

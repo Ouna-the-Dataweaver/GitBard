@@ -240,8 +240,8 @@
   border: 1px solid #334155;
   border-radius: 6px;
   padding: 12px 22px;
-  min-width: 170px;
-  max-width: 220px;
+  box-sizing: border-box;
+  width: 220px;
   color: #e2e8f0;
   transition: border-color 0.2s, box-shadow 0.2s;
   cursor: pointer;
@@ -431,6 +431,159 @@
   font-size: 0.88rem;
   color: #94a3b8;
   line-height: 1.6;
+}
+
+/* Insert (+) node between pipeline stages */
+.v4-insert-node {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #0f172a;
+  border: 1px solid #334155;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #64748b;
+  position: relative;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s, color 0.2s;
+}
+
+.v4-insert-node:hover {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+.v4-insert-cross {
+  position: relative;
+  width: 11px;
+  height: 11px;
+  display: block;
+  pointer-events: none;
+}
+
+.v4-insert-cross::before,
+.v4-insert-cross::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: currentColor;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.v4-insert-cross::before {
+  width: 11px;
+  height: 1.5px;
+}
+
+.v4-insert-cross::after {
+  width: 1.5px;
+  height: 11px;
+}
+
+.v4-insert-handle {
+  width: 6px;
+  height: 6px;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  background: transparent;
+}
+
+.v4-insert-handle-left {
+  left: 0;
+}
+
+.v4-insert-handle-right {
+  right: 0;
+}
+
+/* Step picker overlay */
+.v4-picker-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 4, 10, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  backdrop-filter: blur(4px);
+}
+
+.v4-picker {
+  background: #0b0f19;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  width: 380px;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.v4-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.v4-picker-header h3 {
+  margin: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #94a3b8;
+}
+
+.v4-picker-list {
+  padding: 8px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.v4-picker-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 10px 14px;
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.v4-picker-item:hover {
+  background: rgba(245, 158, 11, 0.06);
+  border-color: #334155;
+}
+
+.v4-picker-item-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.v4-picker-item-desc {
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.v4-picker-item:hover .v4-picker-item-name {
+  color: #f59e0b;
 }
 
 @media (max-width: 1100px) {
