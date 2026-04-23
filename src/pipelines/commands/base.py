@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..base import Pipeline
+from ..base import Pipeline, PreparationConfig, WorkspaceConfig
+from ..builder import PipelineBuildConfig, build_pipeline
 
 
 class Command(ABC):
@@ -29,7 +30,13 @@ class Command(ABC):
 
     @property
     def agent_name(self) -> str:
-        return "gitlab-review"
+        return "Build"
+
+    @property
+    def opencode_agent(self) -> str | None:
+        if self.agent_name == "Build":
+            return None
+        return self.agent_name
 
     @property
     def description(self) -> str:
@@ -50,6 +57,23 @@ class Command(ABC):
     @property
     def allow_dependency_install(self) -> bool:
         return False
+
+    @property
+    def workspace_config(self) -> WorkspaceConfig:
+        return WorkspaceConfig(mode="fresh_clone", cleanup_required=True)
+
+    @property
+    def preparation_config(self) -> PreparationConfig:
+        routes: list[str] = []
+        if self.enable_repo_hook:
+            routes.append("repo_hook")
+        if self.enable_opencode_preparation:
+            routes.append("opencode")
+        return PreparationConfig(routes=tuple(routes))
+
+    @property
+    def stage_ids(self) -> tuple[str, ...] | None:
+        return None
 
     def admin_document_id(self) -> str:
         return self.name.replace("_", "-")
@@ -101,7 +125,15 @@ class Command(ABC):
             "updatedAt": now_iso,
         }
 
-    @abstractmethod
     def get_pipeline(self) -> Pipeline:
         """Return the pipeline for this command"""
-        pass
+        return build_pipeline(
+            PipelineBuildConfig(
+                name=self.name,
+                preset=self.preset,
+                stage_ids=self.stage_ids,
+                workspace_config=self.workspace_config,
+                preparation_config=self.preparation_config,
+                agent=self.opencode_agent,
+            )
+        )

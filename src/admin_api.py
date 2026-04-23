@@ -7,45 +7,17 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from src.pipelines.builder import (
+    PipelineBuildConfig,
+    available_stage_ids,
+    available_stage_metadata,
+    normalize_preset,
+    resolve_stage_ids,
+    supported_presets,
+)
 from src.pipelines.registry import COMMANDS
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
-
-PIPELINE_PRESET_STAGES = {
-    "review": [
-        "HookResolverStage",
-        "SnapshotResolverStage",
-        "WorkspaceAcquisitionStage",
-        "IssueContextFetcherStage",
-        "OpencodeIntegrationStage",
-        "NoteUpdaterStage",
-    ],
-    "ask": [
-        "HookResolverStage",
-        "SnapshotResolverStage",
-        "WorkspaceAcquisitionStage",
-        "IssueContextFetcherStage",
-        "OpencodeIntegrationStage",
-        "NoteUpdaterStage",
-    ],
-    "test": [
-        "HookResolverStage",
-        "SnapshotResolverStage",
-        "WorkspaceAcquisitionStage",
-        "IssueContextFetcherStage",
-        "OpencodeIntegrationStage",
-        "NoteUpdaterStage",
-    ],
-    "deep_test": [
-        "HookResolverStage",
-        "SnapshotResolverStage",
-        "WorkspaceAcquisitionStage",
-        "IssueContextFetcherStage",
-        "WorkspacePreparationStage",
-        "OpencodeIntegrationStage",
-        "NoteUpdaterStage",
-    ],
-}
 
 SUPPORTED_TRIGGER_TYPES = [
     "slash_command",
@@ -54,7 +26,8 @@ SUPPORTED_TRIGGER_TYPES = [
     "merge_request_event",
 ]
 SUPPORTED_SCOPES = ["issue", "merge_request", "both"]
-SUPPORTED_PRESETS = list(PIPELINE_PRESET_STAGES.keys())
+SUPPORTED_PRESETS = list(supported_presets())
+_AVAILABLE_STAGE_IDS = set(available_stage_ids())
 
 
 def _utcnow() -> str:
@@ -151,9 +124,11 @@ def _coerce_pipeline_document(payload: dict[str, Any]) -> dict[str, Any]:
     document["id"] = _slugify(
         str(document.get("id") or document.get("name") or "pipeline")
     )
-    document["preset"] = str(document.get("preset") or document["execution"]["mode"])
-    document["execution"]["mode"] = str(
-        document["execution"].get("mode") or document["preset"]
+    document["preset"] = normalize_preset(
+        str(document.get("preset") or document["execution"]["mode"])
+    )
+    document["execution"]["mode"] = normalize_preset(
+        str(document["execution"].get("mode") or document["preset"])
     )
     document["updatedAt"] = _utcnow()
     return document
@@ -170,6 +145,20 @@ def _validate_pipeline(
 
     if document["preset"] not in SUPPORTED_PRESETS:
         errors.append(f"Unsupported preset: {document['preset']}")
+
+    custom_stages = document.get("stages")
+    if custom_stages is not None:
+        if not isinstance(custom_stages, list):
+            errors.append("stages must be a list of stage IDs.")
+        elif len(custom_stages) == 0:
+            errors.append("stages cannot be empty.")
+        else:
+            unknown = [s for s in custom_stages if s not in _AVAILABLE_STAGE_IDS]
+            if unknown:
+                errors.append(f"Unknown stage(s): {', '.join(unknown)}")
+            duplicate_ids = {s for s in custom_stages if custom_stages.count(s) > 1}
+            if duplicate_ids:
+                errors.append(f"Duplicate stage(s): {', '.join(sorted(duplicate_ids))}")
 
     trigger = document["trigger"]
     trigger_type = trigger.get("type")
@@ -234,7 +223,20 @@ def _validate_pipeline(
 
 def _compile_preview(document: dict[str, Any]) -> dict[str, Any]:
     preset = str(document.get("preset") or document.get("execution", {}).get("mode"))
-    stages = PIPELINE_PRESET_STAGES.get(preset, [])
+    custom_stages = document.get("stages")
+    stage_ids = tuple(custom_stages) if custom_stages else None
+    try:
+        stages = list(
+            resolve_stage_ids(
+                PipelineBuildConfig(
+                    name=document["id"],
+                    preset=preset,
+                    stage_ids=stage_ids,
+                )
+            )
+        )
+    except ValueError:
+        stages = []
     trigger = document.get("trigger", {})
     execution = document.get("execution", {})
     return {
@@ -273,6 +275,7 @@ def get_metadata() -> dict[str, Any]:
         "workspace_modes": ["fresh_clone"],
         "checkout_strategies": ["source_branch", "explicit_ref"],
         "output_post_modes": ["new_note", "update_progress_note"],
+        "available_stages": available_stage_metadata(),
     }
 
 
