@@ -620,7 +620,6 @@
 
 /* ---------- Editor panel ---------- */
 .v4-editor {
-  height: 340px;
   border-top: 1px solid #1e293b;
   background: #0b0f19;
   flex-shrink: 0;
@@ -1149,6 +1148,20 @@
 
 .v4-resize-handle:hover,
 .v4-resize-handle:active {
+  background: #f59e0b;
+}
+
+.v4-resize-handle-v {
+  height: 4px;
+  background: transparent;
+  cursor: row-resize;
+  transition: background 0.15s;
+  flex-shrink: 0;
+  z-index: 5;
+}
+
+.v4-resize-handle-v:hover,
+.v4-resize-handle-v:active {
   background: #f59e0b;
 }
 

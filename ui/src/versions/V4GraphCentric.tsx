@@ -738,7 +738,9 @@ export default function V4GraphCentric() {
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [editorHeight, setEditorHeight] = useState(340);
   const isResizing = useRef(false);
+  const isResizingVertical = useRef(false);
   const {
     metadata,
     pipelines,
@@ -762,12 +764,24 @@ export default function V4GraphCentric() {
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing.current) return;
-      const newWidth = Math.min(Math.max(e.clientX, 200), 500);
-      setSidebarWidth(newWidth);
+      if (isResizing.current) {
+        const newWidth = Math.min(Math.max(e.clientX, 200), 500);
+        setSidebarWidth(newWidth);
+      }
+      if (isResizingVertical.current) {
+        const mainRect = document.querySelector(".v4-main")?.getBoundingClientRect();
+        const headerRect = document.querySelector(".v4-header")?.getBoundingClientRect();
+        if (mainRect && headerRect) {
+          const min = 120;
+          const max = mainRect.bottom - headerRect.bottom - min;
+          const newHeight = Math.min(Math.max(e.clientY - headerRect.bottom, min), max);
+          setEditorHeight(newHeight);
+        }
+      }
     };
     const handleMouseUp = () => {
       isResizing.current = false;
+      isResizingVertical.current = false;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
@@ -1129,7 +1143,17 @@ export default function V4GraphCentric() {
               )}
             </div>
 
-            <div className="v4-editor">
+            <div
+              className="v4-resize-handle-v"
+              onMouseDown={() => {
+                isResizingVertical.current = true;
+                document.body.style.cursor = "row-resize";
+                document.body.style.userSelect = "none";
+              }}
+              title="Resize editor panel"
+            />
+
+            <div className="v4-editor" style={{ height: editorHeight }}>
               {!selectedSection ? (
                 <div className="v4-editor-placeholder">
                   <div className="v4-pipeline-details">
