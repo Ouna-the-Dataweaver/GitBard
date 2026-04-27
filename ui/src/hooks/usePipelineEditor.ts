@@ -80,6 +80,12 @@ export function usePipelineEditor() {
     setPipelines(pipelineSummaries);
   }
 
+  async function refreshMetadata() {
+    const metadataResponse = await fetchMetadata();
+    setMetadata(metadataResponse);
+    return metadataResponse;
+  }
+
   async function selectPipeline(pipelineId: string) {
     setSelectedPipelineId(pipelineId);
     setLoading(true);
@@ -307,5 +313,6 @@ export function usePipelineEditor() {
     createNewPipeline,
     duplicateDraft,
     deleteCurrentPipeline,
+    refreshMetadata,
   };
 }
