@@ -72,11 +72,20 @@ export interface MetadataResponse {
   scopes: Scope[];
   pipeline_presets: PipelinePreset[];
   agents: string[];
+  agent_options?: Array<{ name: string; description: string }>;
   models: string[];
+  model_options?: Array<{ name: string; provider: string }>;
   workspace_modes: string[];
   checkout_strategies: string[];
   output_post_modes: Array<"new_note" | "update_progress_note">;
   available_stages: Array<{ id: string; name: string; description: string }>;
+}
+
+export interface OpenCodeSettings {
+  available_model_options: Array<{ name: string; provider: string }>;
+  selected_models: string[];
+  last_model_reload_at: string | null;
+  last_model_reload_error: string | null;
 }
 
 export interface ValidationResponse {

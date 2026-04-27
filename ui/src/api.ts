@@ -1,5 +1,6 @@
 import type {
   MetadataResponse,
+  OpenCodeSettings,
   PipelineDocument,
   PipelineSummary,
   PreviewResponse,
@@ -25,6 +26,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchMetadata(): Promise<MetadataResponse> {
   return request<MetadataResponse>("/api/admin/metadata");
+}
+
+export function fetchOpenCodeSettings(): Promise<OpenCodeSettings> {
+  return request<OpenCodeSettings>("/api/admin/settings/opencode");
+}
+
+export function saveOpenCodeSettings(
+  settings: Pick<OpenCodeSettings, "available_model_options" | "selected_models">,
+): Promise<OpenCodeSettings> {
+  return request<OpenCodeSettings>("/api/admin/settings/opencode", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+export function reloadOpenCodeModels(): Promise<OpenCodeSettings> {
+  return request<OpenCodeSettings>("/api/admin/settings/opencode/reload-models", {
+    method: "POST",
+  });
 }
 
 export async function fetchPipelines(): Promise<PipelineSummary[]> {
