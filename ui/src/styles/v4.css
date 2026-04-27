@@ -825,6 +825,234 @@
   width: auto;
 }
 
+/* ---------- OpenCode option picker ---------- */
+.v4-opencode-picker {
+  min-width: 0;
+}
+
+.v4-picker-current {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 56px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background:
+    linear-gradient(90deg, rgba(52, 211, 153, 0.12), transparent 58%),
+    rgba(15, 23, 42, 0.45);
+}
+
+.v4-picker-current strong {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  color: #f8fafc;
+  overflow-wrap: anywhere;
+}
+
+.v4-picker-current small,
+.v4-option-item small {
+  font-size: 0.72rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+.v4-option-list {
+  display: grid;
+  gap: 6px;
+  max-height: 168px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.v4-option-item {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 46px;
+  text-align: left;
+  background: rgba(15, 23, 42, 0.48);
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 9px 10px;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.v4-option-item:hover {
+  background: rgba(245, 158, 11, 0.06);
+  border-color: #475569;
+}
+
+.v4-option-item span {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.v4-option-selected {
+  border-color: #34d399;
+  background: rgba(52, 211, 153, 0.09);
+  color: #f8fafc;
+}
+
+.v4-option-custom {
+  border-style: dashed;
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.v4-option-custom span {
+  color: #fbbf24;
+}
+
+.v4-option-empty {
+  border: 1px dashed #334155;
+  border-radius: 6px;
+  padding: 12px;
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+/* ---------- OpenCode settings ---------- */
+.v4-settings-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+}
+
+.v4-settings-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 4, 10, 0.76);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+
+.v4-settings-modal {
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(680px, calc(100vh - 64px));
+  display: flex;
+  flex-direction: column;
+  background: #0b0f19;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.v4-settings-loading {
+  width: 360px;
+  gap: 16px;
+  padding: 20px;
+  color: #94a3b8;
+}
+
+.v4-settings-header,
+.v4-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.v4-settings-footer {
+  border-top: 1px solid #1e293b;
+  border-bottom: 0;
+}
+
+.v4-settings-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #f8fafc;
+}
+
+.v4-settings-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: end;
+  padding: 16px 20px 8px;
+}
+
+.v4-settings-search {
+  min-width: 0;
+}
+
+.v4-settings-count {
+  padding: 0 20px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.v4-settings-error {
+  margin: 0 20px 12px;
+  border: 1px solid rgba(251, 113, 133, 0.32);
+  border-left: 3px solid #fb7185;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: rgba(190, 18, 60, 0.1);
+  color: #fecdd3;
+  font-size: 0.82rem;
+}
+
+.v4-model-checklist {
+  display: grid;
+  gap: 6px;
+  padding: 0 20px 18px;
+  overflow: auto;
+}
+
+.v4-model-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: center;
+  min-height: 48px;
+  padding: 9px 12px;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.48);
+  cursor: pointer;
+}
+
+.v4-model-row:hover {
+  border-color: #475569;
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.v4-model-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #34d399;
+}
+
+.v4-model-row span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.v4-model-row strong {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  color: #e2e8f0;
+  overflow-wrap: anywhere;
+}
+
+.v4-model-row small {
+  color: #64748b;
+  font-size: 0.74rem;
+}
+
 /* ---------- Step picker ---------- */
 .v4-picker-overlay {
   position: absolute;
