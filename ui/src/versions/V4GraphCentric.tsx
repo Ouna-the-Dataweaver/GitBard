@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import ReactFlow, {
   Background,
   Handle,
@@ -737,6 +737,8 @@ export default function V4GraphCentric() {
     useState<OpenCodeSettings | null>(null);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const isResizing = useRef(false);
   const {
     metadata,
     pipelines,
@@ -757,6 +759,25 @@ export default function V4GraphCentric() {
     deleteCurrentPipeline,
     refreshMetadata,
   } = usePipelineEditor();
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing.current) return;
+      const newWidth = Math.min(Math.max(e.clientX, 200), 500);
+      setSidebarWidth(newWidth);
+    };
+    const handleMouseUp = () => {
+      isResizing.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
 
   const flow = useMemo(
     () => buildEditableFlow(preview, draft, selectedSection),
@@ -930,7 +951,7 @@ export default function V4GraphCentric() {
   }
 
   return (
-    <div className="v4-app">
+    <div className="v4-app" style={{ gridTemplateColumns: `${sidebarWidth}px 4px 1fr` }}>
       <aside className="v4-sidebar">
         <div className="v4-sidebar-header">
           <h1>Pipeline Admin</h1>
@@ -983,6 +1004,16 @@ export default function V4GraphCentric() {
           })}
         </div>
       </aside>
+
+      <div
+        className="v4-resize-handle"
+        onMouseDown={() => {
+          isResizing.current = true;
+          document.body.style.cursor = "col-resize";
+          document.body.style.userSelect = "none";
+        }}
+        title="Resize sidebar"
+      />
 
       <main className="v4-main">
         {draft ? (

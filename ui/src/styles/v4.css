@@ -1137,15 +1137,58 @@
   color: #f59e0b;
 }
 
+/* ---------- Resize handle ---------- */
+.v4-resize-handle {
+  width: 4px;
+  background: transparent;
+  cursor: col-resize;
+  transition: background 0.15s;
+  flex-shrink: 0;
+  z-index: 5;
+}
+
+.v4-resize-handle:hover,
+.v4-resize-handle:active {
+  background: #f59e0b;
+}
+
+/* ---------- Dark scrollbars ---------- */
+.v4-app ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.v4-app ::-webkit-scrollbar-track {
+  background: #0b0f19;
+}
+
+.v4-app ::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+.v4-app ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+.v4-app {
+  scrollbar-color: #334155 #0b0f19;
+  scrollbar-width: thin;
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
   .v4-app {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto 1fr;
   }
   .v4-sidebar {
     border-right: 0;
     border-bottom: 1px solid #1e293b;
     max-height: 280px;
+  }
+  .v4-resize-handle {
+    display: none;
   }
   .v4-grid,
   .v4-feedback-inline,
