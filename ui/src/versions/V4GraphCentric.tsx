@@ -8,9 +8,14 @@ import ReactFlow, {
   useReactFlow,
   useStore,
 } from "reactflow";
+import {
+  fetchOpenCodeSettings,
+  reloadOpenCodeModels,
+  saveOpenCodeSettings,
+} from "../api";
 import { usePipelineEditor } from "../hooks/usePipelineEditor";
 import { commaSeparated, buildEditableFlow } from "../lib/helpers";
-import type { PipelineDocument } from "../types";
+import type { OpenCodeSettings, PipelineDocument } from "../types";
 import "../styles/v4.css";
 
 /* ------------------------------------------------------------------ */
@@ -226,6 +231,26 @@ function IconLock({ size = 20, color = "currentColor" }: IconProps) {
   );
 }
 
+function IconSettings({ size = 20, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function IconRefresh({ size = 20, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" />
+      <path d="M3 21v-5h5" />
+      <path d="M3 12A9 9 0 0 1 18.5 5.8L21 8" />
+      <path d="M21 3v5h-5" />
+    </svg>
+  );
+}
+
 function IconFlask({ size = 20, color = "currentColor" }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -405,6 +430,207 @@ function StepPickerModal({
 }
 
 /* ------------------------------------------------------------------ */
+/*  OpenCode picker                                                    */
+/* ------------------------------------------------------------------ */
+function OpenCodePicker({
+  label,
+  value,
+  options,
+  customLabel,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ name: string; detail?: string }>;
+  customLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const selectedKnown = options.some((option) => option.name === value);
+  const filteredOptions = options.filter((option) => {
+    if (!normalizedQuery) return true;
+    return `${option.name} ${option.detail ?? ""}`
+      .toLowerCase()
+      .includes(normalizedQuery);
+  });
+  const canAddCustom = query.trim().length > 0 && query.trim() !== value;
+
+  return (
+    <div className="v4-field v4-opencode-picker">
+      <span>{label}</span>
+      <div className="v4-picker-current">
+        <strong>{value || "Not set"}</strong>
+        <small>{selectedKnown ? "Configured option" : "Custom entry"}</small>
+      </div>
+      <input
+        value={query}
+        placeholder={`Search or add ${label.toLowerCase()}`}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+      <div className="v4-option-list">
+        {filteredOptions.map((option) => (
+          <button
+            key={option.name}
+            type="button"
+            className={`v4-option-item ${option.name === value ? "v4-option-selected" : ""}`}
+            onClick={() => {
+              onChange(option.name);
+              setQuery("");
+            }}
+          >
+            <span>{option.name}</span>
+            {option.detail ? <small>{option.detail}</small> : null}
+          </button>
+        ))}
+        {canAddCustom && (
+          <button
+            type="button"
+            className="v4-option-item v4-option-custom"
+            onClick={() => {
+              onChange(query.trim());
+              setQuery("");
+            }}
+          >
+            <span>{customLabel}</span>
+            <small>{query.trim()}</small>
+          </button>
+        )}
+        {!filteredOptions.length && !canAddCustom ? (
+          <div className="v4-option-empty">No matches</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function OpenCodeSettingsModal({
+  settings,
+  busy,
+  error,
+  onClose,
+  onReload,
+  onSave,
+}: {
+  settings: OpenCodeSettings;
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+  onReload: () => Promise<OpenCodeSettings>;
+  onSave: (settings: OpenCodeSettings) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [draftSettings, setDraftSettings] = useState(settings);
+  const selected = new Set(draftSettings.selected_models);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredModels = draftSettings.available_model_options.filter((option) => {
+    if (!normalizedQuery) return true;
+    return `${option.name} ${option.provider}`.toLowerCase().includes(normalizedQuery);
+  });
+
+  const toggleModel = (modelName: string) => {
+    setDraftSettings((current) => {
+      const nextSelected = new Set(current.selected_models);
+      if (nextSelected.has(modelName)) {
+        nextSelected.delete(modelName);
+      } else {
+        nextSelected.add(modelName);
+      }
+      return {
+        ...current,
+        selected_models: Array.from(nextSelected),
+      };
+    });
+  };
+
+  const replaceSettings = (nextSettings: OpenCodeSettings) => {
+    setDraftSettings(nextSettings);
+    setQuery("");
+  };
+
+  return (
+    <div className="v4-settings-overlay" onClick={onClose}>
+      <div className="v4-settings-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="v4-settings-header">
+          <div>
+            <div className="v4-eyebrow">OpenCode Settings</div>
+            <h3>Visible Models</h3>
+          </div>
+          <button className="v4-btn-ghost" type="button" onClick={onClose}>
+            &times;
+          </button>
+        </div>
+        <div className="v4-settings-actions">
+          <label className="v4-field v4-settings-search">
+            <span>Search Models</span>
+            <input
+              value={query}
+              placeholder="provider/model"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+          <button
+            className="v4-btn"
+            type="button"
+            disabled={busy}
+            onClick={async () => {
+              try {
+                const nextSettings = await onReload();
+                replaceSettings(nextSettings);
+              } catch {
+                // Error text is owned by the parent settings state.
+              }
+            }}
+          >
+            <IconRefresh size={14} />
+            Reload
+          </button>
+        </div>
+        {error || draftSettings.last_model_reload_error ? (
+          <div className="v4-settings-error">
+            {error ?? draftSettings.last_model_reload_error}
+          </div>
+        ) : null}
+        <div className="v4-settings-count">
+          {draftSettings.selected_models.length} of {draftSettings.available_model_options.length} models visible
+        </div>
+        <div className="v4-model-checklist">
+          {filteredModels.map((option) => (
+            <label key={option.name} className="v4-model-row">
+              <input
+                type="checkbox"
+                checked={selected.has(option.name)}
+                onChange={() => toggleModel(option.name)}
+              />
+              <span>
+                <strong>{option.name}</strong>
+                {option.provider ? <small>{option.provider}</small> : null}
+              </span>
+            </label>
+          ))}
+          {!filteredModels.length ? (
+            <div className="v4-option-empty">No models match this search.</div>
+          ) : null}
+        </div>
+        <div className="v4-settings-footer">
+          <button className="v4-btn-ghost" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="v4-btn v4-btn-primary"
+            type="button"
+            disabled={busy || draftSettings.selected_models.length === 0}
+            onClick={() => onSave(draftSettings)}
+          >
+            Save Models
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Zoom panel                                                         */
 /* ------------------------------------------------------------------ */
 function ZoomPanel() {
@@ -506,6 +732,11 @@ export default function V4GraphCentric() {
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [insertAtIndex, setInsertAtIndex] = useState<number>(-1);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [opencodeSettings, setOpencodeSettings] =
+    useState<OpenCodeSettings | null>(null);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const {
     metadata,
     pipelines,
@@ -524,11 +755,34 @@ export default function V4GraphCentric() {
     createNewPipeline,
     duplicateDraft,
     deleteCurrentPipeline,
+    refreshMetadata,
   } = usePipelineEditor();
 
   const flow = useMemo(
     () => buildEditableFlow(preview, draft, selectedSection),
     [preview, draft, selectedSection],
+  );
+  const agentOptions = useMemo(
+    () =>
+      (metadata?.agent_options ?? metadata?.agents.map((name) => ({
+        name,
+        description: "",
+      })) ?? []).map((option) => ({
+        name: option.name,
+        detail: option.description,
+      })),
+    [metadata],
+  );
+  const modelOptions = useMemo(
+    () =>
+      (metadata?.model_options ?? metadata?.models.map((name) => ({
+        name,
+        provider: "",
+      })) ?? []).map((option) => ({
+        name: option.name,
+        detail: option.provider ? `Provider: ${option.provider}` : "",
+      })),
+    [metadata],
   );
 
   const onNodeClick = useCallback(
@@ -580,6 +834,69 @@ export default function V4GraphCentric() {
       });
     },
     [draft, preview, updateDraft],
+  );
+
+  const openSettings = useCallback(async () => {
+    setSettingsOpen(true);
+    setSettingsBusy(true);
+    setSettingsError(null);
+    try {
+      const settings = await fetchOpenCodeSettings();
+      setOpencodeSettings(settings);
+    } catch (settingsLoadError) {
+      setSettingsError(
+        settingsLoadError instanceof Error
+          ? settingsLoadError.message
+          : "Failed to load OpenCode settings.",
+      );
+    } finally {
+      setSettingsBusy(false);
+    }
+  }, []);
+
+  const handleReloadModels = useCallback(async () => {
+    setSettingsBusy(true);
+    setSettingsError(null);
+    try {
+      const settings = await reloadOpenCodeModels();
+      setOpencodeSettings(settings);
+      await refreshMetadata();
+      return settings;
+    } catch (reloadError) {
+      const message =
+        reloadError instanceof Error
+          ? reloadError.message
+          : "Failed to reload OpenCode models.";
+      setSettingsError(message);
+      throw new Error(message);
+    } finally {
+      setSettingsBusy(false);
+    }
+  }, [refreshMetadata]);
+
+  const handleSaveSettings = useCallback(
+    async (settings: OpenCodeSettings) => {
+      setSettingsBusy(true);
+      setSettingsError(null);
+      try {
+        const savedSettings = await saveOpenCodeSettings({
+          available_model_options: settings.available_model_options,
+          selected_models: settings.selected_models,
+        });
+        setOpencodeSettings(savedSettings);
+        await refreshMetadata();
+        setSettingsOpen(false);
+      } catch (saveError) {
+        setSettingsError(
+          saveError instanceof Error
+            ? saveError.message
+            : "Failed to save OpenCode settings.",
+        );
+      } finally {
+        setSettingsBusy(false);
+      }
+    },
+    [refreshMetadata],
   );
 
   if (loading && !draft) {
@@ -691,6 +1008,14 @@ export default function V4GraphCentric() {
                   />
                 )}
                 <button
+                  className="v4-btn"
+                  type="button"
+                  onClick={() => void openSettings()}
+                >
+                  <IconSettings size={14} />
+                  Settings
+                </button>
+                <button
                   className="v4-btn v4-btn-primary"
                   type="button"
                   disabled={saving || !dirty}
@@ -743,6 +1068,33 @@ export default function V4GraphCentric() {
                   onSelect={handleAddStage}
                   onClose={() => setPickerOpen(false)}
                 />
+              )}
+              {settingsOpen && (
+                <div className="v4-settings-layer">
+                  {opencodeSettings ? (
+                    <OpenCodeSettingsModal
+                      settings={opencodeSettings}
+                      busy={settingsBusy}
+                      error={settingsError}
+                      onClose={() => setSettingsOpen(false)}
+                      onReload={handleReloadModels}
+                      onSave={(settings) => void handleSaveSettings(settings)}
+                    />
+                  ) : (
+                    <div className="v4-settings-overlay">
+                      <div className="v4-settings-modal v4-settings-loading">
+                        {settingsError ?? "Loading OpenCode settings..."}
+                        <button
+                          className="v4-btn-ghost"
+                          type="button"
+                          onClick={() => setSettingsOpen(false)}
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -1167,42 +1519,30 @@ export default function V4GraphCentric() {
                           ))}
                         </select>
                       </label>
-                      <label className="v4-field">
-                        <span>Agent Name</span>
-                        <select
-                          value={draft.execution.agentName}
-                          onChange={(e) =>
-                            updateDraft((c) => {
-                              c.execution.agentName = e.target.value;
-                              return c;
-                            })
-                          }
-                        >
-                          {metadata?.agents.map((a) => (
-                            <option key={a} value={a}>
-                              {a}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="v4-field">
-                        <span>Model Name</span>
-                        <select
-                          value={draft.execution.modelName}
-                          onChange={(e) =>
-                            updateDraft((c) => {
-                              c.execution.modelName = e.target.value;
-                              return c;
-                            })
-                          }
-                        >
-                          {metadata?.models.map((m) => (
-                            <option key={m} value={m}>
-                              {m}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <OpenCodePicker
+                        label="Agent"
+                        value={draft.execution.agentName}
+                        options={agentOptions}
+                        customLabel="Use custom agent"
+                        onChange={(value) =>
+                          updateDraft((c) => {
+                            c.execution.agentName = value;
+                            return c;
+                          })
+                        }
+                      />
+                      <OpenCodePicker
+                        label="Model"
+                        value={draft.execution.modelName}
+                        options={modelOptions}
+                        customLabel="Add custom model"
+                        onChange={(value) =>
+                          updateDraft((c) => {
+                            c.execution.modelName = value;
+                            return c;
+                          })
+                        }
+                      />
                       <label
                         className="v4-field"
                         style={{ gridColumn: "1 / -1" }}
