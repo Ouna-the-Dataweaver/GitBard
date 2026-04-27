@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import json
+from pathlib import Path
 import re
+import subprocess
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -28,6 +31,15 @@ SUPPORTED_TRIGGER_TYPES = [
 SUPPORTED_SCOPES = ["issue", "merge_request", "both"]
 SUPPORTED_PRESETS = list(supported_presets())
 _AVAILABLE_STAGE_IDS = set(available_stage_ids())
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_OPENCODE_CONFIG_PATH = _REPO_ROOT / "opencode.json"
+_ADMIN_SETTINGS_PATH = _REPO_ROOT / ".gitbard_admin_settings.json"
+_DEFAULT_MODELS = [
+    "minimax/MiniMax-M2.1",
+    "openai/gpt-5.4",
+    "anthropic/claude-sonnet-4.5",
+]
+_MODEL_ID_PATTERN = re.compile(r"\b[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.:-]+\b")
 
 
 def _utcnow() -> str:
@@ -85,6 +97,192 @@ def _default_pipeline_document() -> dict[str, Any]:
         },
         "updatedAt": _utcnow(),
     }
+
+
+def _read_opencode_config() -> dict[str, Any]:
+    try:
+        return json.loads(_OPENCODE_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _opencode_agent_options() -> list[dict[str, str]]:
+    config = _read_opencode_config()
+    configured_agents = config.get("agent", {})
+    options: list[dict[str, str]] = [
+        {
+            "name": name,
+            "description": str(details.get("description") or ""),
+        }
+        for name, details in sorted(configured_agents.items())
+        if isinstance(details, dict)
+    ]
+    if not any(option["name"] == "Build" for option in options):
+        options.append(
+            {
+                "name": "Build",
+                "description": "OpenCode default build agent.",
+            }
+        )
+    return options
+
+
+def _opencode_model_options() -> list[dict[str, str]]:
+    settings = _read_admin_settings()
+    return _selected_model_options(settings)
+
+
+def _model_option(model: str) -> dict[str, str]:
+    return {"name": model, "provider": model.split("/", 1)[0] if "/" in model else ""}
+
+
+def _default_model_options() -> list[dict[str, str]]:
+    return [_model_option(model) for model in _DEFAULT_MODELS]
+
+
+def _dedupe_model_options(options: list[dict[str, str]]) -> list[dict[str, str]]:
+    deduped: dict[str, dict[str, str]] = {}
+    for option in options:
+        name = str(option.get("name") or "").strip()
+        if not name:
+            continue
+        deduped[name] = {
+            "name": name,
+            "provider": str(
+                option.get("provider")
+                or (name.split("/", 1)[0] if "/" in name else "")
+            ),
+        }
+    return sorted(deduped.values(), key=lambda option: option["name"].lower())
+
+
+def _read_admin_settings() -> dict[str, Any]:
+    try:
+        raw_settings = json.loads(_ADMIN_SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raw_settings = {}
+    available = _dedupe_model_options(
+        raw_settings.get("available_model_options") or _default_model_options()
+    )
+    selected = [
+        str(model).strip()
+        for model in raw_settings.get("selected_models", [])
+        if str(model).strip()
+    ]
+    if not selected:
+        selected = [option["name"] for option in available]
+    return {
+        "available_model_options": available,
+        "selected_models": selected,
+        "last_model_reload_at": raw_settings.get("last_model_reload_at"),
+        "last_model_reload_error": raw_settings.get("last_model_reload_error"),
+    }
+
+
+def _write_admin_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    normalized = {
+        "available_model_options": _dedupe_model_options(
+            settings.get("available_model_options") or _default_model_options()
+        ),
+        "selected_models": [
+            str(model).strip()
+            for model in settings.get("selected_models", [])
+            if str(model).strip()
+        ],
+        "last_model_reload_at": settings.get("last_model_reload_at"),
+        "last_model_reload_error": settings.get("last_model_reload_error"),
+    }
+    _ADMIN_SETTINGS_PATH.write_text(
+        json.dumps(normalized, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return _read_admin_settings()
+
+
+def _selected_model_options(settings: dict[str, Any]) -> list[dict[str, str]]:
+    selected_names = set(settings.get("selected_models") or [])
+    options = [
+        option
+        for option in settings["available_model_options"]
+        if option["name"] in selected_names
+    ]
+    return options or settings["available_model_options"]
+
+
+def _parse_opencode_models_output(output: str) -> list[dict[str, str]]:
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        parsed = None
+
+    names: list[str] = []
+    if isinstance(parsed, list):
+        for item in parsed:
+            if isinstance(item, str):
+                names.append(item)
+            elif isinstance(item, dict):
+                value = item.get("id") or item.get("name") or item.get("model")
+                if value:
+                    names.append(str(value))
+    elif isinstance(parsed, dict):
+        for value in parsed.values():
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str):
+                        names.append(item)
+                    elif isinstance(item, dict):
+                        model = item.get("id") or item.get("name") or item.get("model")
+                        if model:
+                            names.append(str(model))
+
+    if not names:
+        names = _MODEL_ID_PATTERN.findall(output)
+
+    return _dedupe_model_options([_model_option(name) for name in names])
+
+
+def _reload_opencode_models() -> dict[str, Any]:
+    settings = _read_admin_settings()
+    result_settings = deepcopy(settings)
+    try:
+        result = subprocess.run(
+            ["opencode", "models"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        result_settings["last_model_reload_at"] = _utcnow()
+        result_settings["last_model_reload_error"] = str(exc)
+        return _write_admin_settings(result_settings)
+
+    result_settings["last_model_reload_at"] = _utcnow()
+    if result.returncode != 0:
+        result_settings["last_model_reload_error"] = (
+            result.stderr.strip() or result.stdout.strip() or "opencode models failed"
+        )
+        return _write_admin_settings(result_settings)
+
+    discovered = _parse_opencode_models_output(result.stdout)
+    if not discovered:
+        result_settings["last_model_reload_error"] = "opencode models returned no model IDs"
+        return _write_admin_settings(result_settings)
+
+    previous_selected = set(settings.get("selected_models") or [])
+    selected = [
+        option["name"]
+        for option in discovered
+        if option["name"] in previous_selected
+    ]
+    result_settings.update(
+        {
+            "available_model_options": discovered,
+            "selected_models": selected or [option["name"] for option in discovered],
+            "last_model_reload_error": None,
+        }
+    )
+    return _write_admin_settings(result_settings)
 
 
 def _seed_pipelines() -> dict[str, dict[str, Any]]:
@@ -262,21 +460,59 @@ def _get_pipeline_or_404(pipeline_id: str) -> dict[str, Any]:
 
 @router.get("/metadata")
 def get_metadata() -> dict[str, Any]:
+    agent_options = _opencode_agent_options()
+    model_options = _opencode_model_options()
     return {
         "trigger_types": SUPPORTED_TRIGGER_TYPES,
         "scopes": SUPPORTED_SCOPES,
         "pipeline_presets": SUPPORTED_PRESETS,
-        "agents": ["gitlab-review", "gitlab-prepare", "Build"],
-        "models": [
-            "minimax/MiniMax-M2.1",
-            "openai/gpt-5.4",
-            "anthropic/claude-sonnet-4.5",
-        ],
+        "agents": [option["name"] for option in agent_options],
+        "agent_options": agent_options,
+        "models": [option["name"] for option in model_options],
+        "model_options": model_options,
         "workspace_modes": ["fresh_clone"],
         "checkout_strategies": ["source_branch", "explicit_ref"],
         "output_post_modes": ["new_note", "update_progress_note"],
         "available_stages": available_stage_metadata(),
     }
+
+
+@router.get("/settings/opencode")
+def get_opencode_settings() -> dict[str, Any]:
+    return _read_admin_settings()
+
+
+@router.put("/settings/opencode")
+def update_opencode_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    current = _read_admin_settings()
+    available = _dedupe_model_options(
+        payload.get("available_model_options") or current["available_model_options"]
+    )
+    available_names = {option["name"] for option in available}
+    selected = [
+        str(model).strip()
+        for model in payload.get("selected_models", current["selected_models"])
+        if str(model).strip()
+    ]
+    selected = [model for model in selected if model in available_names]
+    if not selected:
+        raise HTTPException(
+            status_code=422,
+            detail={"errors": ["At least one visible model must be selected."]},
+        )
+    return _write_admin_settings(
+        {
+            **current,
+            "available_model_options": available,
+            "selected_models": selected,
+            "last_model_reload_error": current.get("last_model_reload_error"),
+        }
+    )
+
+
+@router.post("/settings/opencode/reload-models")
+def reload_opencode_models() -> dict[str, Any]:
+    return _reload_opencode_models()
 
 
 @router.get("/pipelines")

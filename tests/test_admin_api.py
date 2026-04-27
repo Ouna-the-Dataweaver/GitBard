@@ -1,17 +1,72 @@
 from fastapi.testclient import TestClient
 
+import src.admin_api as admin_api
 from app import app
 
 
 client = TestClient(app)
 
 
-def test_admin_metadata_endpoint():
+def test_admin_metadata_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin_api, "_ADMIN_SETTINGS_PATH", tmp_path / "settings.json")
     response = client.get("/api/admin/metadata")
     assert response.status_code == 200
     data = response.json()
     assert "trigger_types" in data
     assert "pipeline_presets" in data
+    assert "gitlab-review" in data["agents"]
+    assert any(
+        option["name"] == "gitlab-review"
+        and "Reviews merge requests" in option["description"]
+        for option in data["agent_options"]
+    )
+    assert any(option["name"] == "Build" for option in data["agent_options"])
+    assert any(option["name"] == "minimax/MiniMax-M2.1" for option in data["model_options"])
+
+
+def test_opencode_settings_controls_visible_models(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin_api, "_ADMIN_SETTINGS_PATH", tmp_path / "settings.json")
+
+    response = client.put(
+        "/api/admin/settings/opencode",
+        json={
+            "available_model_options": [
+                {"name": "openai/gpt-5.4", "provider": "openai"},
+                {"name": "anthropic/claude-sonnet-4.5", "provider": "anthropic"},
+            ],
+            "selected_models": ["openai/gpt-5.4"],
+        },
+    )
+    assert response.status_code == 200
+
+    metadata = client.get("/api/admin/metadata").json()
+    assert metadata["models"] == ["openai/gpt-5.4"]
+    assert metadata["model_options"] == [
+        {"name": "openai/gpt-5.4", "provider": "openai"}
+    ]
+
+
+def test_opencode_settings_reload_models(tmp_path, monkeypatch):
+    monkeypatch.setattr(admin_api, "_ADMIN_SETTINGS_PATH", tmp_path / "settings.json")
+
+    class FakeCompletedProcess:
+        returncode = 0
+        stdout = "openai/gpt-5.4\nanthropic/claude-sonnet-4.5\n"
+        stderr = ""
+
+    def fake_run(*args, **kwargs):
+        assert args[0] == ["opencode", "models"]
+        return FakeCompletedProcess()
+
+    monkeypatch.setattr(admin_api.subprocess, "run", fake_run)
+    response = client.post("/api/admin/settings/opencode/reload-models")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["last_model_reload_error"] is None
+    assert {option["name"] for option in data["available_model_options"]} == {
+        "openai/gpt-5.4",
+        "anthropic/claude-sonnet-4.5",
+    }
 
 
 def test_admin_pipelines_endpoint_returns_seeded_data():
