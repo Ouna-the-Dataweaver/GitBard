@@ -242,6 +242,7 @@ def test_admin_preview_rejects_empty_stages():
     data = response.json()
     assert data["valid"] is False
     assert any("stages cannot be empty" in e for e in data["errors"])
+    assert data["compiled_pipeline"]["stages"] == []
 
 
 def test_admin_preview_fallback_to_preset_stages():

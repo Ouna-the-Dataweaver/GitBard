@@ -1098,7 +1098,7 @@ export default function V4GraphCentric() {
       if (!draft || !preview) return;
       const currentStages =
         draft.stages ?? preview.compiled_pipeline.stages;
-      if (currentStages.length <= 1) return;
+      if (currentStages.length === 0) return;
       const newStages = [...currentStages];
       const removedStage = newStages[stageIndex];
       newStages.splice(stageIndex, 1);

@@ -538,7 +538,7 @@ def _validate_pipeline(
 def _compile_preview(document: dict[str, Any]) -> dict[str, Any]:
     preset = str(document.get("preset") or document.get("execution", {}).get("mode"))
     custom_stages = document.get("stages")
-    stage_ids = tuple(custom_stages) if custom_stages else None
+    stage_ids = tuple(custom_stages) if isinstance(custom_stages, list) else None
     step_settings = document.get("stepSettings") or {}
     execution = document.get("execution", {})
     step_settings = {
