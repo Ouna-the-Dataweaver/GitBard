@@ -33,7 +33,8 @@ export function usePipelineEditor() {
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dirty = useMemo(() => {
-    if (!draft || !original) return false;
+    if (!draft) return false;
+    if (!original) return true;
     return JSON.stringify(draft) !== JSON.stringify(original);
   }, [draft, original]);
 
@@ -141,11 +142,12 @@ export function usePipelineEditor() {
 
   async function saveDraft() {
     if (!draft) return;
-    const pipelineId = original?.id ?? draft.id;
     setSaving(true);
     setError(null);
     try {
-      const savedDoc = await savePipeline(pipelineId, draft);
+      const savedDoc = original
+        ? await savePipeline(original.id, draft)
+        : await createPipeline(draft);
       setDraft(savedDoc);
       setOriginal(cloneDocument(savedDoc));
       setSaved(true);
@@ -166,16 +168,17 @@ export function usePipelineEditor() {
     setLoading(true);
     setError(null);
     try {
+      const now = Date.now();
       const template: PipelineDocument = {
-        id: `new-pipeline-${Date.now()}`,
+        id: `new-pipeline-${now}`,
         name: "New Pipeline",
-        enabled: true,
+        enabled: false,
         description: "",
         preset: "review",
         trigger: {
           type: "slash_command",
           scope: "merge_request",
-          commandText: `/oc_custom_${Date.now()}`,
+          commandText: `/oc_custom_${now}`,
           mentionTarget: "@nid-bugbard",
         },
         filters: {
@@ -209,16 +212,17 @@ export function usePipelineEditor() {
           keepEventsJsonl: true,
           keepRenderedReplyMarkdown: true,
         },
+        stages: [],
+        stepSettings: {},
+        contextHandling: {},
         updatedAt: new Date().toISOString(),
       };
-      const created = await createPipeline(template);
-      await refreshPipelines();
-      setSelectedPipelineId(created.id);
-      setDraft(created);
-      setOriginal(cloneDocument(created));
+      setSelectedPipelineId(null);
+      setDraft(template);
+      setOriginal(null);
       const [previewResponse, validationResponse] = await Promise.all([
-        previewPipeline(created),
-        validatePipeline(created),
+        previewPipeline(template),
+        validatePipeline(template),
       ]);
       setPreview(previewResponse);
       setValidation(validationResponse);
@@ -267,7 +271,21 @@ export function usePipelineEditor() {
 
   async function deleteCurrentPipeline() {
     if (!draft) return;
-    const pipelineId = original?.id ?? draft.id;
+    if (!original) {
+      setDraft(null);
+      setPreview(null);
+      setValidation(null);
+      setSelectedPipelineId(null);
+      const pipelineSummaries = await fetchPipelines();
+      setPipelines(pipelineSummaries);
+      const firstPipelineId = pipelineSummaries[0]?.id ?? null;
+      if (firstPipelineId) {
+        await selectPipeline(firstPipelineId);
+      }
+      return;
+    }
+
+    const pipelineId = original.id;
     setLoading(true);
     setError(null);
     try {
