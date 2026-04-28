@@ -12,8 +12,10 @@ from fastapi import APIRouter, HTTPException
 
 from src.pipelines.builder import (
     PipelineBuildConfig,
+    STAGE_BLOCKS,
     available_stage_ids,
     available_stage_metadata,
+    available_step_metadata,
     normalize_preset,
     resolve_stage_ids,
     supported_presets,
@@ -52,6 +54,7 @@ def _slugify(value: str) -> str:
 
 
 def _default_pipeline_document() -> dict[str, Any]:
+    default_stages = list(resolve_stage_ids(PipelineBuildConfig(name="new-pipeline", preset="review")))
     return {
         "id": "new-pipeline",
         "name": "New Pipeline",
@@ -95,8 +98,38 @@ def _default_pipeline_document() -> dict[str, Any]:
             "keepEventsJsonl": True,
             "keepRenderedReplyMarkdown": True,
         },
+        "stages": default_stages,
+        "stepSettings": _default_step_settings(default_stages),
+        "contextHandling": _default_context_handling(default_stages),
         "updatedAt": _utcnow(),
     }
+
+
+def _default_step_settings(stage_ids: list[str]) -> dict[str, dict[str, Any]]:
+    settings: dict[str, dict[str, Any]] = {}
+    for stage_id in stage_ids:
+        block = STAGE_BLOCKS.get(stage_id)
+        if not block:
+            continue
+        values: dict[str, Any] = {}
+        for field in block.config_schema:
+            if "default" in field:
+                values[str(field["key"])] = field["default"]
+        if values:
+            settings[stage_id] = values
+    return settings
+
+
+def _default_context_handling(stage_ids: list[str]) -> dict[str, dict[str, Any]]:
+    policies: dict[str, dict[str, Any]] = {}
+    for stage_id in stage_ids:
+        block = STAGE_BLOCKS.get(stage_id)
+        if not block:
+            continue
+        default = block.context_schema.get("default", {})
+        if isinstance(default, dict):
+            policies[stage_id] = deepcopy(default)
+    return policies
 
 
 def _read_opencode_config() -> dict[str, Any]:
@@ -312,6 +345,7 @@ def _pipeline_summary(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def _coerce_pipeline_document(payload: dict[str, Any]) -> dict[str, Any]:
+    payload_has_stages = "stages" in payload
     document = deepcopy(_default_pipeline_document())
     for key, value in payload.items():
         if isinstance(value, dict) and isinstance(document.get(key), dict):
@@ -328,8 +362,86 @@ def _coerce_pipeline_document(payload: dict[str, Any]) -> dict[str, Any]:
     document["execution"]["mode"] = normalize_preset(
         str(document["execution"].get("mode") or document["preset"])
     )
+    stage_ids = document.get("stages") if payload_has_stages else None
+    if stage_ids is None:
+        try:
+            stage_ids = list(
+                resolve_stage_ids(
+                    PipelineBuildConfig(name=document["id"], preset=document["preset"])
+                )
+            )
+        except ValueError:
+            stage_ids = []
+        document["stages"] = stage_ids
+    if isinstance(stage_ids, list):
+        payload_step_settings = (
+            payload.get("stepSettings") if isinstance(payload.get("stepSettings"), dict) else {}
+        )
+        payload_context_handling = (
+            payload.get("contextHandling")
+            if isinstance(payload.get("contextHandling"), dict)
+            else {}
+        )
+        document["stepSettings"] = {
+            **_default_step_settings(stage_ids),
+            **payload_step_settings,
+        }
+        document["contextHandling"] = {
+            **_default_context_handling(stage_ids),
+            **payload_context_handling,
+        }
     document["updatedAt"] = _utcnow()
     return document
+
+
+def _validate_stage_contract(stage_ids: list[str]) -> list[str]:
+    errors: list[str] = []
+    positions = {stage_id: index for index, stage_id in enumerate(stage_ids)}
+    for stage_id in stage_ids:
+        block = STAGE_BLOCKS.get(stage_id)
+        if not block:
+            continue
+        index = positions[stage_id]
+        for required in block.required_after:
+            required_index = positions.get(required)
+            if required_index is None:
+                errors.append(f"{stage_id} requires {required} before it.")
+            elif required_index > index:
+                errors.append(f"{stage_id} must run after {required}.")
+        for required in block.required_before:
+            required_index = positions.get(required)
+            if required_index is not None and required_index < index:
+                errors.append(f"{stage_id} must run before {required}.")
+    return errors
+
+
+def _validate_step_settings(document: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    stage_ids = document.get("stages") or []
+    step_settings = document.get("stepSettings") or {}
+    context_handling = document.get("contextHandling") or {}
+
+    if not isinstance(step_settings, dict):
+        return ["stepSettings must be an object keyed by stage ID."]
+    if not isinstance(context_handling, dict):
+        return ["contextHandling must be an object keyed by stage ID."]
+
+    known_stage_ids = set(stage_ids)
+    for stage_id in step_settings:
+        if stage_id not in known_stage_ids:
+            errors.append(f"stepSettings contains non-pipeline step: {stage_id}")
+    for stage_id, policy in context_handling.items():
+        if stage_id not in known_stage_ids:
+            errors.append(f"contextHandling contains non-pipeline step: {stage_id}")
+            continue
+        if not isinstance(policy, dict):
+            errors.append(f"contextHandling for {stage_id} must be an object.")
+            continue
+        for key in ("passToNext", "writeToWorkspace"):
+            if key in policy and not isinstance(policy[key], bool):
+                errors.append(f"contextHandling.{stage_id}.{key} must be a boolean.")
+
+    return errors
 
 
 def _validate_pipeline(
@@ -357,6 +469,10 @@ def _validate_pipeline(
             duplicate_ids = {s for s in custom_stages if custom_stages.count(s) > 1}
             if duplicate_ids:
                 errors.append(f"Duplicate stage(s): {', '.join(sorted(duplicate_ids))}")
+            if not unknown and not duplicate_ids:
+                errors.extend(_validate_stage_contract(custom_stages))
+
+    errors.extend(_validate_step_settings(document))
 
     trigger = document["trigger"]
     trigger_type = trigger.get("type")
@@ -384,10 +500,10 @@ def _validate_pipeline(
 
     if (
         document["preparation"].get("enableOpencodePreparation")
-        and document["preset"] != "deep_test"
+        and "WorkspacePreparationStage" not in (document.get("stages") or [])
     ):
         warnings.append(
-            "OpenCode preparation is enabled, but the selected preset does not currently include the preparation route."
+            "OpenCode preparation is enabled, but the pipeline does not include the preparation step."
         )
 
     if document["preparation"].get("enableRepoHook") and document["workspace"].get(
@@ -423,6 +539,16 @@ def _compile_preview(document: dict[str, Any]) -> dict[str, Any]:
     preset = str(document.get("preset") or document.get("execution", {}).get("mode"))
     custom_stages = document.get("stages")
     stage_ids = tuple(custom_stages) if custom_stages else None
+    step_settings = document.get("stepSettings") or {}
+    execution = document.get("execution", {})
+    step_settings = {
+        **step_settings,
+        "OpencodeIntegrationStage": {
+            "agentName": execution.get("agentName"),
+            "modelName": execution.get("modelName"),
+            **(step_settings.get("OpencodeIntegrationStage") or {}),
+        },
+    }
     try:
         stages = list(
             resolve_stage_ids(
@@ -430,13 +556,14 @@ def _compile_preview(document: dict[str, Any]) -> dict[str, Any]:
                     name=document["id"],
                     preset=preset,
                     stage_ids=stage_ids,
+                    step_configs=step_settings,
+                    context_policies=document.get("contextHandling") or {},
                 )
             )
         )
     except ValueError:
         stages = []
     trigger = document.get("trigger", {})
-    execution = document.get("execution", {})
     return {
         "name": document["id"],
         "preset": preset,
@@ -448,6 +575,13 @@ def _compile_preview(document: dict[str, Any]) -> dict[str, Any]:
         "agent": execution.get("agentName"),
         "model": execution.get("modelName"),
         "stages": stages,
+        "stepSettings": {
+            stage_id: step_settings.get(stage_id, {}) for stage_id in stages
+        },
+        "contextHandling": {
+            stage_id: (document.get("contextHandling") or {}).get(stage_id, {})
+            for stage_id in stages
+        },
     }
 
 
@@ -474,6 +608,7 @@ def get_metadata() -> dict[str, Any]:
         "checkout_strategies": ["source_branch", "explicit_ref"],
         "output_post_modes": ["new_note", "update_progress_note"],
         "available_stages": available_stage_metadata(),
+        "available_steps": available_step_metadata(),
     }
 
 

@@ -64,7 +64,45 @@ export interface PipelineDocument {
     keepRenderedReplyMarkdown: boolean;
   };
   stages?: string[];
+  stepSettings?: Record<string, Record<string, unknown>>;
+  contextHandling?: Record<
+    string,
+    {
+      passToNext?: boolean;
+      writeToWorkspace?: boolean;
+      filename?: string;
+    }
+  >;
   updatedAt: string;
+}
+
+export type StepConfigField = {
+  key: string;
+  label: string;
+  type: "text" | "boolean" | "select" | "multi_select" | "agent" | "model";
+  options?: string[];
+  default?: unknown;
+};
+
+export interface AvailableStep {
+  id: string;
+  stageId: string;
+  name: string;
+  description: string;
+  provider: string;
+  category: string;
+  requiredAfter: string[];
+  requiredBefore: string[];
+  configSchema: StepConfigField[];
+  contextSchema: {
+    consumes?: string[];
+    produces?: string[];
+    default?: {
+      passToNext?: boolean;
+      writeToWorkspace?: boolean;
+      filename?: string;
+    };
+  };
 }
 
 export interface MetadataResponse {
@@ -79,6 +117,7 @@ export interface MetadataResponse {
   checkout_strategies: string[];
   output_post_modes: Array<"new_note" | "update_progress_note">;
   available_stages: Array<{ id: string; name: string; description: string }>;
+  available_steps: AvailableStep[];
 }
 
 export interface OpenCodeSettings {
@@ -107,5 +146,7 @@ export interface PreviewResponse extends ValidationResponse {
     agent: string;
     model: string;
     stages: string[];
+    stepSettings: Record<string, Record<string, unknown>>;
+    contextHandling: NonNullable<PipelineDocument["contextHandling"]>;
   };
 }

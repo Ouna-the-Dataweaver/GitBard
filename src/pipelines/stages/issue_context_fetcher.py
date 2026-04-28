@@ -13,8 +13,15 @@ logger = logging.getLogger(__name__)
 class IssueContextFetcherStage(Stage):
     """Fetch GitLab issue or MR thread content and store it locally."""
 
-    def __init__(self, filename: str = "gitlab_thread_context.md"):
+    def __init__(
+        self,
+        filename: str = "gitlab_thread_context.md",
+        write_to_workspace: bool = True,
+        pass_to_next: bool = True,
+    ):
         self.filename = filename
+        self.write_to_workspace = write_to_workspace
+        self.pass_to_next = pass_to_next
 
     def _execute(self, context: PipelineContext) -> StageResult:
         noteable_type = context.metadata.get("noteable_type")
@@ -44,12 +51,19 @@ class IssueContextFetcherStage(Stage):
             logger.info("Thread context skipped: no content fetched")
             return StageResult(context=context, should_stop=False)
 
-        issue_path = os.path.join(repo_dir, self.filename)
-        with open(issue_path, "w", encoding="utf-8") as handle:
-            handle.write(content)
+        if self.pass_to_next:
+            context.metadata["thread_context_content"] = content
 
-        context.metadata["thread_context_path"] = issue_path
-        logger.info("Thread context saved to %s", issue_path)
+        if self.write_to_workspace:
+            issue_path = os.path.join(repo_dir, self.filename)
+            with open(issue_path, "w", encoding="utf-8") as handle:
+                handle.write(content)
+
+            context.metadata["thread_context_path"] = issue_path
+            logger.info("Thread context saved to %s", issue_path)
+        else:
+            context.metadata.pop("thread_context_path", None)
+            logger.info("Thread context fetched without workspace file output")
 
         return StageResult(context=context, should_stop=False)
 

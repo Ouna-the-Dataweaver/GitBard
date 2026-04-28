@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from ..base import Pipeline, PreparationConfig, WorkspaceConfig
-from ..builder import PipelineBuildConfig, build_pipeline
+from ..builder import PipelineBuildConfig, STAGE_BLOCKS, build_pipeline, resolve_stage_ids
 
 
 class Command(ABC):
@@ -79,6 +79,37 @@ class Command(ABC):
         return self.name.replace("_", "-")
 
     def to_admin_document(self, *, now_iso: str) -> dict[str, Any]:
+        stage_ids = list(
+            resolve_stage_ids(
+                PipelineBuildConfig(
+                    name=self.name,
+                    preset=self.preset,
+                    stage_ids=self.stage_ids,
+                )
+            )
+        )
+        step_settings: dict[str, dict[str, Any]] = {}
+        context_handling: dict[str, dict[str, Any]] = {}
+        for stage_id in stage_ids:
+            block = STAGE_BLOCKS.get(stage_id)
+            if not block:
+                continue
+            values = {
+                str(field["key"]): field["default"]
+                for field in block.config_schema
+                if "default" in field
+            }
+            if values:
+                step_settings[stage_id] = values
+            default_context = block.context_schema.get("default", {})
+            if isinstance(default_context, dict):
+                context_handling[stage_id] = dict(default_context)
+        if "OpencodeIntegrationStage" in stage_ids:
+            step_settings["OpencodeIntegrationStage"] = {
+                **step_settings.get("OpencodeIntegrationStage", {}),
+                "agentName": self.agent_name,
+                "modelName": "minimax/MiniMax-M2.1",
+            }
         return {
             "id": self.admin_document_id(),
             "name": f"{self.name.replace('_', ' ').title()} Pipeline",
@@ -122,6 +153,9 @@ class Command(ABC):
                 "keepEventsJsonl": True,
                 "keepRenderedReplyMarkdown": True,
             },
+            "stages": stage_ids,
+            "stepSettings": step_settings,
+            "contextHandling": context_handling,
             "updatedAt": now_iso,
         }
 

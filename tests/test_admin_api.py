@@ -22,6 +22,12 @@ def test_admin_metadata_endpoint(tmp_path, monkeypatch):
     )
     assert any(option["name"] == "Build" for option in data["agent_options"])
     assert any(option["name"] == "minimax/MiniMax-M2.1" for option in data["model_options"])
+    assert any(
+        step["id"] == "OpencodeIntegrationStage"
+        and step["provider"] == "opencode"
+        and any(field["key"] == "modelName" for field in step["configSchema"])
+        for step in data["available_steps"]
+    )
 
 
 def test_opencode_settings_controls_visible_models(tmp_path, monkeypatch):
@@ -97,7 +103,7 @@ def test_admin_preview_endpoint_compiles_pipeline():
     assert "WorkspaceAcquisitionStage" in data["compiled_pipeline"]["stages"]
 
 
-def test_admin_preview_with_custom_stages():
+def test_admin_preview_rejects_broken_custom_stage_contract():
     response = client.post(
         "/api/admin/pipelines/preview",
         json={
@@ -118,12 +124,58 @@ def test_admin_preview_with_custom_stages():
     )
     assert response.status_code == 200
     data = response.json()
+    assert data["valid"] is False
+    assert any(
+        "NoteUpdaterStage requires OpencodeIntegrationStage before it" in error
+        for error in data["errors"]
+    )
+
+
+def test_admin_preview_with_context_and_step_settings():
+    response = client.post(
+        "/api/admin/pipelines/preview",
+        json={
+            "id": "configured-steps",
+            "name": "Configured Steps",
+            "preset": "review",
+            "trigger": {
+                "type": "slash_command",
+                "scope": "merge_request",
+                "commandText": "/configured_steps",
+            },
+            "stepSettings": {
+                "OpencodeIntegrationStage": {
+                    "agentName": "gitlab-review",
+                    "modelName": "openai/gpt-5.4",
+                },
+                "IssueContextFetcherStage": {
+                    "filename": "mr_context.md",
+                },
+            },
+            "contextHandling": {
+                "IssueContextFetcherStage": {
+                    "passToNext": True,
+                    "writeToWorkspace": True,
+                    "filename": "mr_context.md",
+                }
+            },
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
     assert data["valid"] is True
-    assert data["compiled_pipeline"]["stages"] == [
-        "HookResolverStage",
-        "SnapshotResolverStage",
-        "NoteUpdaterStage",
-    ]
+    assert (
+        data["compiled_pipeline"]["stepSettings"]["OpencodeIntegrationStage"][
+            "modelName"
+        ]
+        == "openai/gpt-5.4"
+    )
+    assert (
+        data["compiled_pipeline"]["contextHandling"]["IssueContextFetcherStage"][
+            "filename"
+        ]
+        == "mr_context.md"
+    )
 
 
 def test_admin_preview_rejects_unknown_stage():

@@ -137,3 +137,50 @@ def test_issue_context_fetcher_writes_merge_request_context(monkeypatch, tmp_pat
     assert "Branches: db -> main" in content
     assert "## Changes" in content
     assert "```diff" in content
+
+
+def test_issue_context_fetcher_can_pass_context_without_file(monkeypatch, tmp_path):
+    payload = {
+        "project": {
+            "id": 2679,
+            "web_url": "https://gitlab.example.com/group/repo",
+            "path_with_namespace": "group/repo",
+        },
+        "object_attributes": {
+            "noteable_type": "Issue",
+            "noteable_iid": 223,
+        },
+    }
+    context = PipelineContext(
+        webhook_payload=payload,
+        local_context_path=str(tmp_path),
+        metadata={"noteable_type": "Issue"},
+    )
+    stage = IssueContextFetcherStage(write_to_workspace=False, pass_to_next=True)
+
+    monkeypatch.setenv("GITLAB_PAT", "test-token")
+    monkeypatch.setenv("GITLAB_URL", "https://gitlab.example.com/group/repo")
+
+    responses = {
+        "https://gitlab.example.com/api/v4/projects/2679/issues/223": JsonResponse(
+            {
+                "title": "Bug",
+                "state": "opened",
+                "description": "Something broke.",
+            }
+        ),
+        "https://gitlab.example.com/api/v4/projects/2679/issues/223/notes": JsonResponse(
+            []
+        ),
+    }
+
+    def fake_get(url, headers, timeout):
+        return responses[url]
+
+    monkeypatch.setattr("src.pipelines.stages.issue_context_fetcher.requests.get", fake_get)
+
+    result = stage.execute(context)
+
+    assert not result.should_stop
+    assert "thread_context_path" not in context.metadata
+    assert "# GitLab Issue Context" in context.metadata["thread_context_content"]

@@ -14,8 +14,8 @@ import {
   saveOpenCodeSettings,
 } from "../api";
 import { usePipelineEditor } from "../hooks/usePipelineEditor";
-import { commaSeparated, buildEditableFlow } from "../lib/helpers";
-import type { OpenCodeSettings, PipelineDocument } from "../types";
+import { commaSeparated, buildEditableFlow, STAGE_CATALOG } from "../lib/helpers";
+import type { AvailableStep, OpenCodeSettings, PipelineDocument, StepConfigField } from "../types";
 import "../styles/v4.css";
 
 /* ------------------------------------------------------------------ */
@@ -398,7 +398,7 @@ function StepPickerModal({
   onSelect,
   onClose,
 }: {
-  stages: Array<{ id: string; name: string; description: string }>;
+  stages: AvailableStep[];
   onSelect: (stageId: string) => void;
   onClose: () => void;
 }) {
@@ -420,11 +420,228 @@ function StepPickerModal({
               onClick={() => onSelect(stage.id)}
             >
               <div className="v4-picker-item-name">{stage.name}</div>
-              <div className="v4-picker-item-desc">{stage.description}</div>
+              <div className="v4-picker-item-desc">
+                {stage.provider} / {stage.description}
+              </div>
             </button>
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function fieldOptions(
+  field: StepConfigField,
+  agentOptions: Array<{ name: string; detail?: string }>,
+  modelOptions: Array<{ name: string; detail?: string }>,
+) {
+  if (field.type === "agent") return agentOptions.map((option) => option.name);
+  if (field.type === "model") return modelOptions.map((option) => option.name);
+  return field.options ?? [];
+}
+
+function StepConfigurationPanel({
+  draft,
+  steps,
+  selectedSection,
+  agentOptions,
+  modelOptions,
+  updateDraft,
+}: {
+  draft: PipelineDocument;
+  steps: AvailableStep[];
+  selectedSection: string;
+  agentOptions: Array<{ name: string; detail?: string }>;
+  modelOptions: Array<{ name: string; detail?: string }>;
+  updateDraft: (updater: (currentDraft: PipelineDocument) => PipelineDocument) => void;
+}) {
+  const stageIds = draft.stages ?? [];
+  const editableSteps = stageIds
+    .filter((stageId) => STAGE_CATALOG[stageId]?.section === selectedSection)
+    .map((stageId) => steps.find((step) => step.id === stageId))
+    .filter((step): step is AvailableStep => Boolean(step));
+
+  if (!editableSteps.length) return null;
+
+  const updateStepSetting = (
+    stageId: string,
+    key: string,
+    value: unknown,
+  ) => {
+    updateDraft((current) => {
+      current.stepSettings = {
+        ...(current.stepSettings ?? {}),
+        [stageId]: {
+          ...(current.stepSettings?.[stageId] ?? {}),
+          [key]: value,
+        },
+      };
+      return current;
+    });
+  };
+
+  const updateContext = (
+    stageId: string,
+    key: "passToNext" | "writeToWorkspace" | "filename",
+    value: boolean | string,
+  ) => {
+    updateDraft((current) => {
+      current.contextHandling = {
+        ...(current.contextHandling ?? {}),
+        [stageId]: {
+          ...(current.contextHandling?.[stageId] ?? {}),
+          [key]: value,
+        },
+      };
+      return current;
+    });
+  };
+
+  return (
+    <div className="v4-step-config-list">
+      {editableSteps.map((step) => {
+        const settings = draft.stepSettings?.[step.id] ?? {};
+        const context =
+          draft.contextHandling?.[step.id] ?? step.contextSchema.default ?? {};
+        return (
+          <section key={step.id} className="v4-step-config">
+            <div className="v4-step-config-head">
+              <div>
+                <div className="v4-step-config-provider">{step.provider}</div>
+                <h4>{step.name}</h4>
+              </div>
+              <span>{step.category}</span>
+            </div>
+            <p>{step.description}</p>
+            {step.configSchema.length ? (
+              <div className="v4-step-config-grid">
+                {step.configSchema.map((field) => {
+                  const value = settings[field.key] ?? field.default ?? "";
+                  const options = fieldOptions(field, agentOptions, modelOptions);
+                  if (field.type === "boolean") {
+                    return (
+                      <label key={field.key} className="v4-field v4-check">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(value)}
+                          onChange={(e) =>
+                            updateStepSetting(step.id, field.key, e.target.checked)
+                          }
+                        />
+                        <span>{field.label}</span>
+                      </label>
+                    );
+                  }
+                  if (field.type === "multi_select") {
+                    const selected = new Set(
+                      Array.isArray(value) ? value.map(String) : [],
+                    );
+                    return (
+                      <div key={field.key} className="v4-field">
+                        <span>{field.label}</span>
+                        <div className="v4-inline-checks">
+                          {options.map((option) => (
+                            <label key={option} className="v4-check">
+                              <input
+                                type="checkbox"
+                                checked={selected.has(option)}
+                                onChange={(e) => {
+                                  const next = new Set(selected);
+                                  if (e.target.checked) next.add(option);
+                                  else next.delete(option);
+                                  updateStepSetting(
+                                    step.id,
+                                    field.key,
+                                    Array.from(next),
+                                  );
+                                }}
+                              />
+                              <span>{option}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (field.type === "select" || field.type === "agent" || field.type === "model") {
+                    return (
+                      <label key={field.key} className="v4-field">
+                        <span>{field.label}</span>
+                        <select
+                          value={String(value)}
+                          onChange={(e) =>
+                            updateStepSetting(step.id, field.key, e.target.value)
+                          }
+                        >
+                          {options.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  }
+                  return (
+                    <label key={field.key} className="v4-field">
+                      <span>{field.label}</span>
+                      <input
+                        value={String(value)}
+                        onChange={(e) =>
+                          updateStepSetting(step.id, field.key, e.target.value)
+                        }
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            ) : null}
+            <div className="v4-context-box">
+              <div className="v4-context-columns">
+                <label className="v4-field v4-check">
+                  <input
+                    type="checkbox"
+                    checked={context.passToNext !== false}
+                    onChange={(e) =>
+                      updateContext(step.id, "passToNext", e.target.checked)
+                    }
+                  />
+                  <span>Pass context forward</span>
+                </label>
+                <label className="v4-field v4-check">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(context.writeToWorkspace)}
+                    onChange={(e) =>
+                      updateContext(step.id, "writeToWorkspace", e.target.checked)
+                    }
+                  />
+                  <span>Write context file</span>
+                </label>
+                <label className="v4-field">
+                  <span>Workspace file</span>
+                  <input
+                    value={context.filename ?? ""}
+                    placeholder="optional"
+                    onChange={(e) =>
+                      updateContext(step.id, "filename", e.target.value)
+                    }
+                  />
+                </label>
+              </div>
+              <div className="v4-context-tags">
+                {(step.contextSchema.consumes ?? []).map((item) => (
+                  <span key={`in-${item}`}>in: {item}</span>
+                ))}
+                {(step.contextSchema.produces ?? []).map((item) => (
+                  <span key={`out-${item}`}>out: {item}</span>
+                ))}
+              </div>
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -842,17 +1059,38 @@ export default function V4GraphCentric() {
   const handleAddStage = useCallback(
     (stageId: string) => {
       if (!draft || !preview) return;
+      const step = metadata?.available_steps.find((item) => item.id === stageId);
       const currentStages =
         draft.stages ?? preview.compiled_pipeline.stages;
       const newStages = [...currentStages];
       newStages.splice(insertAtIndex, 0, stageId);
       updateDraft((c) => {
         c.stages = newStages;
+        if (step) {
+          const defaultSettings = Object.fromEntries(
+            step.configSchema
+              .filter((field) => field.default !== undefined)
+              .map((field) => [field.key, field.default]),
+          );
+          c.stepSettings = {
+            ...(c.stepSettings ?? {}),
+            ...(Object.keys(defaultSettings).length
+              ? { [stageId]: defaultSettings }
+              : {}),
+          };
+          c.contextHandling = {
+            ...(c.contextHandling ?? {}),
+            [stageId]: step.contextSchema.default ?? {
+              passToNext: true,
+              writeToWorkspace: false,
+            },
+          };
+        }
         return c;
       });
       setPickerOpen(false);
     },
-    [draft, preview, insertAtIndex, updateDraft],
+    [draft, preview, metadata, insertAtIndex, updateDraft],
   );
 
   const handleRemoveStage = useCallback(
@@ -862,9 +1100,18 @@ export default function V4GraphCentric() {
         draft.stages ?? preview.compiled_pipeline.stages;
       if (currentStages.length <= 1) return;
       const newStages = [...currentStages];
+      const removedStage = newStages[stageIndex];
       newStages.splice(stageIndex, 1);
       updateDraft((c) => {
         c.stages = newStages;
+        if (removedStage) {
+          const { [removedStage]: _removedSettings, ...stepSettings } =
+            c.stepSettings ?? {};
+          const { [removedStage]: _removedContext, ...contextHandling } =
+            c.contextHandling ?? {};
+          c.stepSettings = stepSettings;
+          c.contextHandling = contextHandling;
+        }
         return c;
       });
     },
@@ -1109,7 +1356,7 @@ export default function V4GraphCentric() {
               </ReactFlow>
               {pickerOpen && metadata && (
                 <StepPickerModal
-                  stages={metadata.available_stages}
+                  stages={metadata.available_steps}
                   onSelect={handleAddStage}
                   onClose={() => setPickerOpen(false)}
                 />
@@ -1352,6 +1599,17 @@ export default function V4GraphCentric() {
                         <span>Enabled</span>
                       </label>
                     </div>
+                  )}
+
+                  {metadata && (
+                    <StepConfigurationPanel
+                      draft={draft}
+                      steps={metadata.available_steps}
+                      selectedSection={selectedSection}
+                      agentOptions={agentOptions}
+                      modelOptions={modelOptions}
+                      updateDraft={updateDraft}
+                    />
                   )}
 
                   {selectedSection === "trigger" && (
