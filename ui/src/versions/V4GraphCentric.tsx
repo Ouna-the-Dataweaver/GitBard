@@ -991,7 +991,7 @@ export default function V4GraphCentric() {
         if (mainRect && headerRect) {
           const min = 120;
           const max = mainRect.bottom - headerRect.bottom - min;
-          const newHeight = Math.min(Math.max(e.clientY - headerRect.bottom, min), max);
+          const newHeight = Math.min(Math.max(mainRect.bottom - e.clientY, min), max);
           setEditorHeight(newHeight);
         }
       }
