@@ -1,0 +1,23 @@
+{
+  "available_model_options": [
+    {
+      "name": "minimax/MiniMax-M2.1",
+      "provider": "minimax"
+    },
+    {
+      "name": "openai/gpt-5.4",
+      "provider": "openai"
+    },
+    {
+      "name": "anthropic/claude-sonnet-4.5",
+      "provider": "anthropic"
+    }
+  ],
+  "selected_models": [
+    "minimax/MiniMax-M2.1",
+    "openai/gpt-5.4",
+    "anthropic/claude-sonnet-4.5"
+  ],
+  "last_model_reload_at": null,
+  "last_model_reload_error": null
+}

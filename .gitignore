@@ -1,19 +1,39 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+.gitbard_admin_settings.json
+
+# Python
 .uv/
 .venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
 env/
-.env
-*.log
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
 .pytest_cache/
+.ruff_cache/
 .coverage
+.coverage.*
 htmlcov/
+
+# JavaScript / TypeScript
+node_modules/
 dist/
 build/
-node_modules/
-*.egg-info/
-.DS_Store
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# GitBard runtime artifacts
 repos/
+opencode_events.jsonl
+opencode_reply.md
+opencode_prep_events.jsonl
+opencode_prep_report.md
+
+# Logs and OS files
+*.log
+.DS_Store

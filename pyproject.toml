@@ -1,5 +1,5 @@
 [project]
-name = "oc_hooks"
+name = "gitbard"
 version = "0.1.0"
 dependencies = [
     "fastapi",
