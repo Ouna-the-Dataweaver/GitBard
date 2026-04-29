@@ -1,94 +1,113 @@
-# GitLab AI Code Reviewer
+# GitBard
 
-Webhook-driven pipeline system for AI-powered code review on GitLab Merge Requests and Issues.
+Webhook-driven pipeline system for running OpenCode agents from GitLab issue and merge request comments.
 
-## Current State
+## What It Does
 
-**Pipeline architecture is in place.** The system receives note webhooks, detects slash commands and bot mentions, and replies back into GitLab. Command execution is partially implemented:
-- `/oc_review` now uses the real `opencode` CLI path with a dedicated review agent prompt from [`opencode.json`](/mnt/asr_hot/agafonov/repos_2/GitBard/opencode.json).
-- `/oc_ask` uses the real `opencode` CLI path with the default agent.
-- `/oc_test` uses the same real `opencode` CLI path for ad hoc testing.
-- `/oc_deeptest` uses the same OpenCode path, but also runs repository preparation before the main agent.
-- Fresh-clone workspace acquisition is now explicit and leaves a hook for future cached workspace reuse.
-- Repository preparation supports repo-root `.gitbard.sh` and a separate OpenCode preparation pass before the main agent run.
-- `@nid-bugbard` mentions on merge requests now route into the review pipeline; non-MR mentions still trigger a simple confirmation reply.
+GitBard receives GitLab note webhooks, detects supported slash commands or bot mentions, checks out the target repository state, runs an OpenCode-backed pipeline, and posts the result back to GitLab.
 
-## Architecture
+Supported triggers:
 
-```
-oc_hooks/
-├── app.py                      # FastAPI webhook handler (async → sync bridge)
+- `@nid-bugbard` on a merge request - runs the review pipeline.
+- `@nid-bugbard` on non-MR notes - replies with a lightweight delivery check.
+- `/oc_review` - runs the `gitlab-review` agent from `opencode.json`.
+- `/oc_ask` - runs OpenCode and posts the answer back to the thread.
+- `/oc_test` - runs OpenCode for ad hoc testing.
+- `/oc_deeptest` - runs repository preparation before the main OpenCode pass.
+
+## Layout
+
+```text
+.
+├── app.py                         # FastAPI webhook service
 ├── src/
-│   ├── gitlab_api.py           # Shared GitLab note helpers
+│   ├── admin_api.py               # Admin UI API and local admin settings
+│   ├── gitlab_api.py              # GitLab note helpers
 │   └── pipelines/
-│       ├── base.py             # Pipeline, Stage, Context, Result classes
-│       ├── registry.py         # Command detection and pipeline factory
-│       ├── stages/
-│       │   ├── hook_resolver.py    # Detect commands, post "started" note
-│       │   ├── snapshot_resolver.py # Resolve SHA/branch from MR
-│       │   ├── context_builder.py   # Acquire a workspace (fresh clone for now)
-│       │   ├── repo_hook_preparation.py # Run optional repo-root .gitbard.sh
-│       │   ├── opencode_integration.py  # Run prep/main OpenCode agents
-│       │   └── note_updater.py      # Post results or errors
-│       └── commands/
-│           ├── base.py         # Command base class
-│           ├── oc_review.py    # /oc_review pipeline
-│           ├── oc_ask.py       # /oc_ask pipeline
-│           ├── oc_test.py      # /oc_test pipeline
-│           └── oc_deeptest.py  # /oc_deeptest pipeline
-└── tests/                      # Unit tests (13 passing)
+│       ├── base.py                # Pipeline primitives
+│       ├── builder.py             # Declarative pipeline builder
+│       ├── registry.py            # Command detection
+│       ├── commands/              # Command definitions
+│       └── stages/                # Pipeline stage implementations
+├── prompts/                       # OpenCode agent prompts
+├── scripts/                       # Manual smoke-test helpers
+├── tests/                         # Python test suite
+└── ui/                            # Vite admin frontend
 ```
 
-## Triggers
+## Configuration
 
-- `@nid-bugbard` on a merge request - Runs the `oc_review` pipeline as if the review command had been requested directly.
-- `@nid-bugbard` on non-MR notes - Replies with a simple "ping received" message to prove webhook delivery works.
-- `/oc_review` - Runs the `opencode` CLI with the `gitlab-review` agent defined in `opencode.json`.
-- `/oc_ask` - Runs the `opencode` CLI and posts its response back to the thread.
-- `/oc_test` - Runs the `opencode` CLI and posts its response back to the thread.
-- `/oc_deeptest` - Runs repo preparation (`.gitbard.sh` and `gitlab-prepare`) before the main `opencode` run.
+Copy the example environment and fill in the local values:
+
+```bash
+cp .env.example .env
+```
+
+Required settings:
+
+- `GITLAB_URL` - GitLab instance URL.
+- `GITLAB_PAT` - token used to read GitLab data and post notes.
+- `GITLAB_USER` - bot username without `@`.
+
+Optional settings:
+
+- `OPENCODE_MODEL` - default model for OpenCode stages.
+- `OPENCODE_AGENT` - default OpenCode agent for general commands.
+- `HOST` and `PORT` - FastAPI bind address.
+
+The admin UI writes local OpenCode model picker state to `.gitbard_admin_settings.json`. That file is ignored because it is machine-local runtime state. Use `.gitbard_admin_settings.example.json` as the committed example shape.
+
+`opencode.json` is committed intentionally. It defines the repo-local OpenCode agents and command wiring used by the pipelines.
 
 ## Running
+
+Start the backend:
 
 ```bash
 uv run python app.py
 ```
 
-Or with hot reload:
+Or run with hot reload:
 
 ```bash
 uv run uvicorn app:app --reload --host 0.0.0.0 --port 8585
 ```
 
-## Known Issues
+Build the admin frontend when you want FastAPI to serve `/admin` from `ui/dist`:
 
-### Recursive Webhook Loop
+```bash
+cd ui
+npm install
+npm run build
+```
 
-Bot-authored notes are ignored by comparing the webhook `user.username` with `GITLAB_USER`. The older message-prefix hack is still kept in the pipeline stage as a secondary guard.
+For frontend development, run the Vite dev server from `ui/`.
 
-### OpenCode Agent Integration
+## GitLab Webhook
 
-`OpencodeIntegrationStage` points `OPENCODE_CONFIG` at this repo’s [`opencode.json`](/mnt/asr_hot/agafonov/repos_2/GitBard/opencode.json) before launching `opencode run` inside the checked out target repository. For prep-enabled pipelines such as `/oc_deeptest`, the pipeline first runs an optional repo-root `.gitbard.sh`, then a separate `gitlab-prepare` OpenCode pass that writes `opencode_prep_report.md` and `opencode_prep_events.jsonl` for the main agent to consume.
+Add a project webhook in GitLab:
 
-## Setup
+- URL: `http://your-server:8585/webhook`
+- Trigger: comments events
 
-1. Configure `.env`:
-   - `GITLAB_URL` - GitLab instance URL
-   - `GITLAB_PAT` - Personal Access Token
-   - `GITLAB_USER` - GitLab username that will be mentioned, for example `nid-bugbard`
-   - `OPENCODE_MODEL` - OpenCode model id, defaults to `minimax/MiniMax-M2.1`
-   - `OPENCODE_AGENT` - OpenCode agent name for general commands, defaults to `Build`
-   - `HOST`/`PORT` - Server binding
+Bot-authored notes are ignored by comparing the webhook `user.username` with `GITLAB_USER`. A message-prefix guard is also kept in the note updater as a secondary loop protection.
 
-2. Add webhook in GitLab project:
-   - URL: `http://your-server:8585/webhook`
-   - Trigger: Comments events
+## OpenCode Runtime
+
+`OpencodeIntegrationStage` sets `OPENCODE_CONFIG` to this repo's `opencode.json` before launching `opencode run` inside the checked-out target repository.
+
+Preparation-enabled pipelines run the optional repo-root `.gitbard.sh` hook first, then a `gitlab-prepare` OpenCode pass. Generated runtime artifacts such as `opencode_prep_report.md`, `opencode_prep_events.jsonl`, `opencode_reply.md`, and `opencode_events.jsonl` are ignored.
 
 ## Testing
+
+Run the Python tests:
 
 ```bash
 uv run pytest tests/ -v
 ```
 
-For an ad hoc local smoke test against a running server, use
-`scripts/manual_webhook_smoke.py`.
+For an ad hoc local smoke test against a running server:
+
+```bash
+uv run python scripts/manual_webhook_smoke.py
+```
