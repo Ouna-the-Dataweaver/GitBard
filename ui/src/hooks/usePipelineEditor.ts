@@ -18,6 +18,15 @@ import type {
 } from "../types";
 import { buildFlow, cloneDocument } from "../lib/helpers";
 
+const DEFAULT_PIPELINE_STAGES = [
+  "HookResolverStage",
+  "SnapshotResolverStage",
+  "WorkspaceAcquisitionStage",
+  "IssueContextFetcherStage",
+  "OpencodeIntegrationStage",
+  "NoteUpdaterStage",
+];
+
 export function usePipelineEditor() {
   const [metadata, setMetadata] = useState<MetadataResponse | null>(null);
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([]);
@@ -212,9 +221,24 @@ export function usePipelineEditor() {
           keepEventsJsonl: true,
           keepRenderedReplyMarkdown: true,
         },
-        stages: [],
-        stepSettings: {},
-        contextHandling: {},
+        stages: DEFAULT_PIPELINE_STAGES,
+        stepSettings: Object.fromEntries(
+          DEFAULT_PIPELINE_STAGES.map((stageId) => {
+            const step = metadata?.available_steps.find((item) => item.id === stageId);
+            const defaults = Object.fromEntries(
+              step?.configSchema
+                .filter((field) => field.default !== undefined)
+                .map((field) => [field.key, field.default]) ?? [],
+            );
+            return [stageId, defaults];
+          }).filter(([, defaults]) => Object.keys(defaults).length > 0),
+        ),
+        contextHandling: Object.fromEntries(
+          DEFAULT_PIPELINE_STAGES.map((stageId) => {
+            const step = metadata?.available_steps.find((item) => item.id === stageId);
+            return [stageId, step?.contextSchema.default ?? {}];
+          }),
+        ),
         updatedAt: new Date().toISOString(),
       };
       setSelectedPipelineId(null);
