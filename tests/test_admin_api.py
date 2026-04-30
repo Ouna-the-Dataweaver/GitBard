@@ -106,7 +106,7 @@ def test_admin_preview_endpoint_compiles_pipeline():
     assert "WorkspaceAcquisitionStage" in data["compiled_pipeline"]["stages"]
 
 
-def test_admin_preview_rejects_broken_custom_stage_contract():
+def test_admin_preview_warns_about_stage_guidance_without_blocking():
     response = client.post(
         "/api/admin/pipelines/preview",
         json={
@@ -127,11 +127,12 @@ def test_admin_preview_rejects_broken_custom_stage_contract():
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["valid"] is False
+    assert data["valid"] is True
     assert any(
-        "NoteUpdaterStage requires OpencodeIntegrationStage before it" in error
-        for error in data["errors"]
+        "NoteUpdaterStage usually runs after OpencodeIntegrationStage" in warning
+        for warning in data["warnings"]
     )
+    assert data["errors"] == []
 
 
 def test_admin_preview_with_context_and_step_settings():

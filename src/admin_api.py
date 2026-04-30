@@ -395,8 +395,8 @@ def _coerce_pipeline_document(payload: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
-def _validate_stage_contract(stage_ids: list[str]) -> list[str]:
-    errors: list[str] = []
+def _validate_stage_guidance(stage_ids: list[str]) -> list[str]:
+    warnings: list[str] = []
     positions = {stage_id: index for index, stage_id in enumerate(stage_ids)}
     for stage_id in stage_ids:
         block = STAGE_BLOCKS.get(stage_id)
@@ -406,14 +406,16 @@ def _validate_stage_contract(stage_ids: list[str]) -> list[str]:
         for required in block.required_after:
             required_index = positions.get(required)
             if required_index is None:
-                errors.append(f"{stage_id} requires {required} before it.")
+                warnings.append(
+                    f"{stage_id} usually runs after {required}, but that step is not in this pipeline."
+                )
             elif required_index > index:
-                errors.append(f"{stage_id} must run after {required}.")
+                warnings.append(f"{stage_id} usually runs after {required}.")
         for required in block.required_before:
             required_index = positions.get(required)
             if required_index is not None and required_index < index:
-                errors.append(f"{stage_id} must run before {required}.")
-    return errors
+                warnings.append(f"{stage_id} usually runs before {required}.")
+    return warnings
 
 
 def _validate_step_settings(document: dict[str, Any]) -> list[str]:
@@ -471,7 +473,7 @@ def _validate_pipeline(
             if duplicate_ids:
                 errors.append(f"Duplicate stage(s): {', '.join(sorted(duplicate_ids))}")
             if not unknown and not duplicate_ids:
-                errors.extend(_validate_stage_contract(custom_stages))
+                warnings.extend(_validate_stage_guidance(custom_stages))
 
     errors.extend(_validate_step_settings(document))
 
