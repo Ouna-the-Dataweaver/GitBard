@@ -16,6 +16,14 @@
         "write": false,
         "edit": false
       }
+    },
+    "deep_review": {
+      "description": "Runs evidence-driven merge request review by executing repository checks where useful.",
+      "prompt": "{file:./prompts/gitlab-deep_review.md}",
+      "tools": {
+        "write": true,
+        "edit": true
+      }
     }
   },
   "command": {
@@ -23,6 +31,11 @@
       "description": "Review the current GitLab thread or merge request.",
       "template": "Review the current GitLab thread or merge request.\n\n$ARGUMENTS",
       "agent": "gitlab-review"
+    },
+    "oc_deepreview": {
+      "description": "Run preparation and deep evidence-driven review for the current GitLab thread or merge request.",
+      "template": "Run preparation and deep evidence-driven review for the current GitLab thread or merge request.\n\n$ARGUMENTS",
+      "agent": "deep_review"
     }
   }
 }

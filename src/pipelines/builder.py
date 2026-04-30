@@ -288,10 +288,20 @@ PIPELINE_PRESET_STAGE_IDS: dict[str, tuple[str, ...]] = {
         "OpencodeIntegrationStage",
         "NoteUpdaterStage",
     ),
+    "deep_review": (
+        "HookResolverStage",
+        "SnapshotResolverStage",
+        "WorkspaceAcquisitionStage",
+        "IssueContextFetcherStage",
+        "WorkspacePreparationStage",
+        "OpencodeIntegrationStage",
+        "NoteUpdaterStage",
+    ),
 }
 
 PRESET_ALIASES = {
     "deeptest": "deep_test",
+    "deepreview": "deep_review",
 }
 
 

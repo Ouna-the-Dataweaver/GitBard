@@ -304,6 +304,7 @@ const PRESET_ICON: Record<string, React.FC<IconProps>> = {
   review: IconChat,
   test: IconFlask,
   deep_test: IconLayers,
+  deep_review: IconChat,
 };
 
 /* ------------------------------------------------------------------ */

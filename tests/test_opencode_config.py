@@ -34,3 +34,26 @@ def test_opencode_prepare_agent_uses_prompt_file():
     prepare_agent = config["agent"]["gitlab-prepare"]
     assert prepare_agent["prompt"] == "{file:./prompts/gitlab-prepare.md}"
     assert (repo_root / "prompts" / "gitlab-prepare.md").exists()
+
+
+def test_opencode_deep_review_command_has_required_template_and_agent():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_path = repo_root / "opencode.json"
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+
+    deep_review_command = config["command"]["oc_deepreview"]
+    assert isinstance(deep_review_command["template"], str)
+    assert deep_review_command["template"].strip()
+    assert deep_review_command["agent"] == "deep_review"
+
+
+def test_opencode_deep_review_agent_uses_prompt_file():
+    repo_root = Path(__file__).resolve().parents[1]
+    config_path = repo_root / "opencode.json"
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+
+    deep_review_agent = config["agent"]["deep_review"]
+    assert deep_review_agent["prompt"] == "{file:./prompts/gitlab-deep_review.md}"
+    assert (repo_root / "prompts" / "gitlab-deep_review.md").exists()

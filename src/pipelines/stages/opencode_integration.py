@@ -237,7 +237,7 @@ class OpencodeIntegrationStage(BaseOpencodeStage):
         return StageResult(context=context, should_stop=False)
 
     def _validate_review_inputs(self, context: PipelineContext) -> None:
-        if context.command != "oc_review":
+        if context.command not in {"oc_review", "oc_deepreview"}:
             return
 
         if context.metadata.get("noteable_type") != "MergeRequest":
@@ -260,7 +260,7 @@ class OpencodeIntegrationStage(BaseOpencodeStage):
         noteable_type = self._format_noteable_type(
             context.metadata.get("noteable_type") or "thread"
         )
-        if context.command == "oc_review":
+        if context.command in {"oc_review", "oc_deepreview"}:
             prompt = self._build_review_prompt(noteable_type, question)
         else:
             prompt = self._build_question_prompt(noteable_type, question)

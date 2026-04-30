@@ -6,7 +6,7 @@ export type TriggerType =
 
 export type Scope = "issue" | "merge_request" | "both";
 
-export type PipelinePreset = "review" | "ask" | "test" | "deep_test";
+export type PipelinePreset = "review" | "ask" | "test" | "deep_test" | "deep_review";
 
 export interface PipelineSummary {
   id: string;

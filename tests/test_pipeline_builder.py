@@ -24,11 +24,18 @@ def test_builder_exposes_current_building_blocks():
         "OpencodeIntegrationStage",
         "NoteUpdaterStage",
     )
-    assert supported_presets() == ("review", "ask", "test", "deep_test")
+    assert supported_presets() == (
+        "review",
+        "ask",
+        "test",
+        "deep_test",
+        "deep_review",
+    )
 
 
 def test_builder_normalizes_legacy_preset_alias():
     assert normalize_preset("deeptest") == "deep_test"
+    assert normalize_preset("deepreview") == "deep_review"
 
 
 def test_builder_resolves_preset_stage_ids():
@@ -69,6 +76,20 @@ def test_builder_builds_preparation_stage_from_deep_test_preset():
         PipelineBuildConfig(
             name="deep",
             preset="deep_test",
+            preparation_config=PreparationConfig(routes=("repo_hook", "opencode")),
+        )
+    )
+
+    prep_stage = pipeline.stages[4]
+    assert isinstance(prep_stage, WorkspacePreparationStage)
+    assert prep_stage.preparation_config.routes == ("repo_hook", "opencode")
+
+
+def test_builder_builds_preparation_stage_from_deep_review_preset():
+    pipeline = build_pipeline(
+        PipelineBuildConfig(
+            name="deep-review",
+            preset="deep_review",
             preparation_config=PreparationConfig(routes=("repo_hook", "opencode")),
         )
     )

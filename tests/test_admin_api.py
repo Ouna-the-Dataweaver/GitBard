@@ -15,6 +15,7 @@ def test_admin_metadata_endpoint(tmp_path, monkeypatch):
     assert "trigger_types" in data
     assert "pipeline_presets" in data
     assert "gitlab-review" in data["agents"]
+    assert "deep_review" in data["agents"]
     assert any(
         option["name"] == "gitlab-review"
         and "Reviews merge requests" in option["description"]
@@ -82,6 +83,7 @@ def test_admin_pipelines_endpoint_returns_seeded_data():
     data = response.json()
     assert len(data["pipelines"]) >= 2
     assert any(item["id"] == "oc-review" for item in data["pipelines"])
+    assert any(item["id"] == "oc-deepreview" for item in data["pipelines"])
 
 
 def test_admin_preview_endpoint_compiles_pipeline():

@@ -5,6 +5,7 @@ from .commands.oc_review import ReviewCommand
 from .commands.oc_ask import AskCommand
 from .commands.oc_test import TestCommand
 from .commands.oc_deeptest import DeepTestCommand
+from .commands.oc_deepreview import DeepReviewCommand
 from .base import Pipeline
 
 
@@ -13,6 +14,7 @@ COMMANDS: List[Command] = [
     AskCommand(),
     TestCommand(),
     DeepTestCommand(),
+    DeepReviewCommand(),
 ]
 
 
