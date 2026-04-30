@@ -238,7 +238,7 @@ STAGE_BLOCKS: dict[str, StageBlock] = {
                 "key": "modelName",
                 "label": "Model",
                 "type": "model",
-                "default": "minimax/MiniMax-M2.1",
+                "default": "minimax/MiniMax-M2.7",
             },
         ),
         context_schema={

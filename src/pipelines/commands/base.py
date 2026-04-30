@@ -108,7 +108,7 @@ class Command(ABC):
             step_settings["OpencodeIntegrationStage"] = {
                 **step_settings.get("OpencodeIntegrationStage", {}),
                 "agentName": self.agent_name,
-                "modelName": "minimax/MiniMax-M2.1",
+                "modelName": "minimax/MiniMax-M2.7",
             }
         return {
             "id": self.admin_document_id(),
@@ -132,7 +132,7 @@ class Command(ABC):
             "execution": {
                 "mode": self.preset,
                 "agentName": self.agent_name,
-                "modelName": "minimax/MiniMax-M2.1",
+                "modelName": "minimax/MiniMax-M2.7",
                 "questionTemplate": "{{note_body_without_trigger}}",
                 "timeoutSeconds": self.timeout_seconds,
                 "maxConcurrentRuns": 1,

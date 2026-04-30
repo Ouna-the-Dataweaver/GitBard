@@ -23,7 +23,7 @@ class BaseOpencodeStage(Stage):
     """Shared OpenCode invocation helpers."""
 
     def __init__(self, model: str | None = None, agent: str | None = None):
-        self.model = model or os.getenv("OPENCODE_MODEL", "minimax/MiniMax-M2.1")
+        self.model = model or os.getenv("OPENCODE_MODEL", "minimax/MiniMax-M2.7")
         self.agent = agent or os.getenv("OPENCODE_AGENT", "Build")
 
     def _require_repo_dir(self, context: PipelineContext) -> str:

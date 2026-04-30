@@ -22,7 +22,7 @@ def test_admin_metadata_endpoint(tmp_path, monkeypatch):
         for option in data["agent_options"]
     )
     assert any(option["name"] == "Build" for option in data["agent_options"])
-    assert any(option["name"] == "minimax/MiniMax-M2.1" for option in data["model_options"])
+    assert any(option["name"] == "minimax/MiniMax-M2.7" for option in data["model_options"])
     assert any(
         step["id"] == "OpencodeIntegrationStage"
         and step["provider"] == "opencode"

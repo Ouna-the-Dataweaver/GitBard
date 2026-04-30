@@ -38,7 +38,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _OPENCODE_CONFIG_PATH = _REPO_ROOT / "opencode.json"
 _ADMIN_SETTINGS_PATH = _REPO_ROOT / ".gitbard_admin_settings.json"
 _DEFAULT_MODELS = [
-    "minimax/MiniMax-M2.1",
+    "minimax/MiniMax-M2.7",
     "openai/gpt-5.4",
     "anthropic/claude-sonnet-4.5",
 ]
@@ -78,7 +78,7 @@ def _default_pipeline_document() -> dict[str, Any]:
         "execution": {
             "mode": "review",
             "agentName": "gitlab-review",
-            "modelName": "minimax/MiniMax-M2.1",
+            "modelName": "minimax/MiniMax-M2.7",
             "questionTemplate": "{{note_body_without_trigger}}",
             "timeoutSeconds": 1800,
             "maxConcurrentRuns": 1,
