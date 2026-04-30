@@ -1,5 +1,7 @@
-from fastapi.testclient import TestClient
+import logging
+
 from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
 
 import app
 
@@ -113,3 +115,26 @@ def test_webhook_ignores_self_authored_note(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ignored", "reason": "self_note"}
+
+
+def test_webhook_logs_received_note_without_trigger(monkeypatch, caplog):
+    payload = {
+        "object_kind": "note",
+        "user": {"username": "alice"},
+        "project": {"id": 1},
+        "object_attributes": {
+            "note": "plain note without command",
+            "noteable_type": "MergeRequest",
+            "noteable_iid": 42,
+        },
+    }
+
+    monkeypatch.setattr(app, "GITLAB_USER", "nid-bugbard")
+
+    with caplog.at_level(logging.INFO, logger=app.logger.name):
+        response = client.post("/webhook", json=payload)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored"}
+    assert "GitLab webhook received" in caplog.text
+    assert "Ignoring webhook note: no supported trigger" in caplog.text

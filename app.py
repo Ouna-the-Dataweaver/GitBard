@@ -44,6 +44,31 @@ if UI_ASSETS_DIR.exists():
     app.mount("/admin/assets", StaticFiles(directory=str(UI_ASSETS_DIR)), name="admin-assets")
 
 
+def _preview_text(value: str, *, limit: int = 160) -> str:
+    compact = " ".join(value.split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[: limit - 3]}..."
+
+
+def _webhook_log_fields(request: Request, payload: dict) -> dict[str, object]:
+    attrs = payload.get("object_attributes", {})
+    project = payload.get("project", {})
+    user = payload.get("user", {})
+    return {
+        "path": request.url.path,
+        "gitlab_event": request.headers.get("x-gitlab-event", ""),
+        "has_gitlab_token": bool(request.headers.get("x-gitlab-token")),
+        "object_kind": payload.get("object_kind"),
+        "noteable_type": attrs.get("noteable_type"),
+        "project_id": project.get("id"),
+        "project_path": project.get("path_with_namespace") or project.get("web_url"),
+        "user": user.get("username") or user.get("name"),
+        "note_id": attrs.get("id"),
+        "note_preview": _preview_text(str(attrs.get("note") or "")),
+    }
+
+
 def build_mention_reply(bot_username: str) -> str:
     mention = f"@{bot_username}" if bot_username else "the bot"
     return (
@@ -76,12 +101,28 @@ async def _run_detected_command(
             context.metadata["display_trigger"] = display_trigger
 
     pipeline = command.get_pipeline()
+    logger.info(
+        "Dispatching pipeline command=%s trigger=%s display_trigger=%s pipeline=%s",
+        command_name,
+        trigger_text or getattr(command, "trigger_pattern", ""),
+        display_trigger or "",
+        pipeline.name,
+    )
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, pipeline.execute, context)
 
     if result.success:
+        logger.info(
+            "Pipeline completed command=%s pipeline=%s", command_name, pipeline.name
+        )
         return JSONResponse({"status": "completed", "command": command_name})
 
+    logger.error(
+        "Pipeline failed command=%s pipeline=%s error=%s",
+        command_name,
+        pipeline.name,
+        result.error,
+    )
     return JSONResponse({"status": "error", "error": str(result.error)}, status_code=500)
 
 
@@ -197,27 +238,70 @@ async def health_check():
 async def gitlab_webhook(request: Request):
     """Receive GitLab webhook events - async, then triggers sync pipeline"""
     try:
+        logger.info(
+            "GitLab webhook request arrived path=%s gitlab_event=%s has_gitlab_token=%s content_type=%s",
+            request.url.path,
+            request.headers.get("x-gitlab-event", ""),
+            bool(request.headers.get("x-gitlab-token")),
+            request.headers.get("content-type", ""),
+        )
         payload = await request.json()
+        log_fields = _webhook_log_fields(request, payload)
+        logger.info("GitLab webhook received: %s", log_fields)
 
         event_type = payload.get("object_kind")
         if event_type != "note":
+            logger.info(
+                "Ignoring webhook: unsupported object_kind=%s gitlab_event=%s project_id=%s",
+                event_type,
+                log_fields["gitlab_event"],
+                log_fields["project_id"],
+            )
             return JSONResponse({"status": "ignored"})
 
         note = payload.get("object_attributes", {}).get("note", "")
         if is_self_authored_note(payload, GITLAB_USER):
-            logger.info("Ignoring self-authored note from %s", GITLAB_USER)
+            logger.info(
+                "Ignoring webhook note: self-authored user=%s project_id=%s noteable_type=%s note_preview=%r",
+                GITLAB_USER,
+                log_fields["project_id"],
+                log_fields["noteable_type"],
+                log_fields["note_preview"],
+            )
             return JSONResponse({"status": "ignored", "reason": "self_note"})
 
         command = detect_command(note)
         if command:
+            logger.info(
+                "Detected slash command command=%s trigger=%s project_id=%s noteable_type=%s note_preview=%r",
+                command.name,
+                command.trigger_pattern,
+                log_fields["project_id"],
+                log_fields["noteable_type"],
+                log_fields["note_preview"],
+            )
             return await _run_detected_command(payload, command.name, command)
 
         if contains_user_mention(note, GITLAB_USER):
             noteable_type = payload.get("object_attributes", {}).get("noteable_type")
+            logger.info(
+                "Detected bot mention user=@%s project_id=%s noteable_type=%s note_preview=%r",
+                GITLAB_USER,
+                log_fields["project_id"],
+                noteable_type,
+                log_fields["note_preview"],
+            )
             if noteable_type == "MergeRequest":
                 return await _run_mention_review(payload)
             return _post_mention_reply(payload)
 
+        logger.info(
+            "Ignoring webhook note: no supported trigger project_id=%s noteable_type=%s configured_user=@%s note_preview=%r",
+            log_fields["project_id"],
+            log_fields["noteable_type"],
+            GITLAB_USER,
+            log_fields["note_preview"],
+        )
         return JSONResponse({"status": "ignored"})
 
     except Exception as exc:
