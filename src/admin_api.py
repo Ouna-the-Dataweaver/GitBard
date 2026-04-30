@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from src.opencode_command import opencode_command_args
 from src.pipelines.builder import (
     PipelineBuildConfig,
     STAGE_BLOCKS,
@@ -279,13 +280,13 @@ def _reload_opencode_models() -> dict[str, Any]:
     result_settings = deepcopy(settings)
     try:
         result = subprocess.run(
-            ["opencode", "models"],
+            opencode_command_args("models"),
             check=False,
             capture_output=True,
             text=True,
             timeout=30,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
         result_settings["last_model_reload_at"] = _utcnow()
         result_settings["last_model_reload_error"] = str(exc)
         return _write_admin_settings(result_settings)

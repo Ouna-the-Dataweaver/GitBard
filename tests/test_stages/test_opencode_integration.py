@@ -126,6 +126,7 @@ def test_opencode_integration_defaults_when_question_missing(monkeypatch, tmp_pa
 
 
 def test_opencode_integration_uses_env_model_and_agent(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENCODE_COMMAND", "opencode-safe")
     monkeypatch.setenv("OPENCODE_MODEL", "openai/gpt-4.1-mini")
     monkeypatch.setenv("OPENCODE_AGENT", "Reviewer")
 
@@ -149,6 +150,7 @@ def test_opencode_integration_uses_env_model_and_agent(monkeypatch, tmp_path):
     result = stage.execute(context)
 
     assert not result.should_stop
+    assert captured["args"][0] == "opencode-safe"
     assert captured["args"][5] == "openai/gpt-4.1-mini"
     assert captured["args"][7] == "Reviewer"
 

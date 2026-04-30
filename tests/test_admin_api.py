@@ -54,6 +54,7 @@ def test_opencode_settings_controls_visible_models(tmp_path, monkeypatch):
 
 def test_opencode_settings_reload_models(tmp_path, monkeypatch):
     monkeypatch.setattr(admin_api, "_ADMIN_SETTINGS_PATH", tmp_path / "settings.json")
+    monkeypatch.setenv("OPENCODE_COMMAND", "opencode-safe")
 
     class FakeCompletedProcess:
         returncode = 0
@@ -61,7 +62,7 @@ def test_opencode_settings_reload_models(tmp_path, monkeypatch):
         stderr = ""
 
     def fake_run(*args, **kwargs):
-        assert args[0] == ["opencode", "models"]
+        assert args[0] == ["opencode-safe", "models"]
         return FakeCompletedProcess()
 
     monkeypatch.setattr(admin_api.subprocess, "run", fake_run)

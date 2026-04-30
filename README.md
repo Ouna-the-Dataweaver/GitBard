@@ -94,7 +94,7 @@ Bot-authored notes are ignored by comparing the webhook `user.username` with `GI
 
 ## OpenCode Runtime
 
-`OpencodeIntegrationStage` sets `OPENCODE_CONFIG` to this repo's `opencode.json` before launching `opencode run` inside the checked-out target repository.
+`OpencodeIntegrationStage` sets `OPENCODE_CONFIG` to this repo's `opencode.json` before launching `opencode run` inside the checked-out target repository. Set `OPENCODE_COMMAND` to use a wrapper or alternate binary, for example `OPENCODE_COMMAND=opencode-safe`.
 
 Preparation-enabled pipelines run the optional repo-root `.gitbard.sh` hook first, then a `gitlab-prepare` OpenCode pass. Generated runtime artifacts such as `opencode_prep_report.md`, `opencode_prep_events.jsonl`, `opencode_reply.md`, and `opencode_events.jsonl` are ignored.
 

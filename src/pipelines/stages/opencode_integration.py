@@ -5,6 +5,8 @@ import subprocess
 from pathlib import Path
 from typing import List
 
+from src.opencode_command import opencode_command_args
+
 from ..base import AgentResult, PipelineContext, Stage, StageResult
 from .preparation_support import (
     append_prep_report_section,
@@ -67,8 +69,7 @@ class BaseOpencodeStage(Stage):
             env.setdefault("OPENCODE_CONFIG", str(OPENCODE_CONFIG_PATH))
 
         return subprocess.run(
-            [
-                "opencode",
+            opencode_command_args(
                 "run",
                 "--format",
                 "json",
@@ -77,7 +78,7 @@ class BaseOpencodeStage(Stage):
                 "--agent",
                 self.agent,
                 prompt,
-            ],
+            ),
             cwd=repo_dir,
             check=False,
             capture_output=True,
