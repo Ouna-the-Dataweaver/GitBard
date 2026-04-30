@@ -67,9 +67,9 @@ export const STAGE_CATALOG: Record<
 };
 
 const VISUAL_GROUPS = [
-  { id: "repoPrep", title: "Repo Prep", accent: "#a3e635" },
-  { id: "agentRun", title: "Agent Run", accent: "#38bdf8" },
-  { id: "publishing", title: "Publishing", accent: "#22c55e" },
+  { id: "repoPrep", title: "Prepare", accent: "#a3e635" },
+  { id: "agentRun", title: "Agent", accent: "#38bdf8" },
+  { id: "publishing", title: "Publish", accent: "#22c55e" },
   { id: "custom", title: "Custom", accent: "#a78bfa" },
 ] as const;
 
@@ -111,7 +111,7 @@ export function buildEditableFlow(
   const GROUP_Y = 56;
   const GROUP_PAD_X = 28;
   const GROUP_PAD_TOP = 58;
-  const GROUP_PAD_BOTTOM = 30;
+  const GROUP_PAD_BOTTOM = 56;
   const GROUP_GAP_X = 64;
   const GROUP_W = NODE_W + GROUP_PAD_X * 2;
   const ROW_GAP = 26;
@@ -170,6 +170,7 @@ export function buildEditableFlow(
         active: groupStages.some(
           ({ info }) => info?.section && info.section === selectedSection,
         ),
+        groupId: group.id,
       },
       type: "stageGroup",
       draggable: false,
@@ -220,41 +221,6 @@ export function buildEditableFlow(
       target: target.id,
       type: "smoothstep",
       markerEnd: { type: MarkerType.ArrowClosed },
-    });
-  }
-
-  for (let i = 0; i <= stages.length; i++) {
-    const previous = stageLayouts[i - 1];
-    const next = stageLayouts[i];
-    let insertX = GROUP_X - INSERT_SIZE - 20;
-    let insertY = GROUP_Y + GROUP_PAD_TOP + NODE_H / 2 - INSERT_SIZE / 2;
-
-    if (previous && next) {
-      if (previous.visualGroup === next.visualGroup) {
-        insertX = previous.x + NODE_W / 2 - INSERT_SIZE / 2;
-        insertY = (previous.y + NODE_H + next.y) / 2 - INSERT_SIZE / 2;
-      } else {
-        insertX =
-          (previous.x + NODE_W + next.x) / 2 - INSERT_SIZE / 2;
-        insertY =
-          (previous.y + NODE_H / 2 + next.y + NODE_H / 2) / 2 -
-          INSERT_SIZE / 2;
-      }
-    } else if (previous) {
-      insertX = previous.x + NODE_W + 22;
-      insertY = previous.y + NODE_H / 2 - INSERT_SIZE / 2;
-    } else if (next) {
-      insertX = next.x - INSERT_SIZE - 22;
-      insertY = next.y + NODE_H / 2 - INSERT_SIZE / 2;
-    }
-
-    const insertId = `insert-${i}`;
-    nodes.push({
-      id: insertId,
-      position: { x: insertX, y: insertY },
-      data: { isInsert: true, insertAtIndex: i },
-      type: "insertNode",
-      zIndex: 3,
     });
   }
 

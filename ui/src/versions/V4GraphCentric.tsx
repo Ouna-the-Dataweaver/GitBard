@@ -15,8 +15,25 @@ import {
 } from "../api";
 import { usePipelineEditor } from "../hooks/usePipelineEditor";
 import { commaSeparated, buildEditableFlow, STAGE_CATALOG } from "../lib/helpers";
-import type { AvailableStep, OpenCodeSettings, PipelineDocument, StepConfigField } from "../types";
+import type { AvailableStep, OpenCodeSettings, PipelineDocument, PreviewResponse, StepConfigField } from "../types";
 import "../styles/v4.css";
+
+/* ------------------------------------------------------------------ */
+/*  Graph action bridge (avoids recreating nodeTypes on every render)  */
+/* ------------------------------------------------------------------ */
+const graphActions = {
+  addToGroup: null as ((groupId: string) => void) | null,
+  removeStage: null as ((index: number) => void) | null,
+  moveStage: null as ((index: number, direction: -1 | 1) => void) | null,
+  selectSection: null as ((section: string | null) => void) | null,
+};
+
+const VISUAL_GROUPS_META = [
+  { id: "repoPrep", title: "Prepare", accent: "#a3e635" },
+  { id: "agentRun", title: "Agent", accent: "#38bdf8" },
+  { id: "publishing", title: "Publish", accent: "#22c55e" },
+  { id: "custom", title: "Custom", accent: "#a78bfa" },
+] as const;
 
 /* ------------------------------------------------------------------ */
 /*  Icons                                                              */
@@ -155,6 +172,22 @@ function IconMinus({ size = 20, color = "currentColor" }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+function IconArrowUp({ size = 20, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="18 15 12 9 6 15" />
+    </svg>
+  );
+}
+
+function IconArrowDown({ size = 20, color = "currentColor" }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9" />
     </svg>
   );
 }
@@ -310,6 +343,42 @@ const PRESET_ICON: Record<string, React.FC<IconProps>> = {
 /* ------------------------------------------------------------------ */
 /*  Nodes                                                              */
 /* ------------------------------------------------------------------ */
+function StageGroupNode({
+  data,
+}: NodeProps<{
+  title: string;
+  count: number;
+  accent: string;
+  active?: boolean;
+  groupId?: string;
+}>) {
+  return (
+    <div
+      className={`v4-stage-group ${data.active ? "v4-stage-group-active" : ""}`}
+      style={{ ["--group-accent" as any]: data.accent }}
+    >
+      <div className="v4-stage-group-header">
+        <span>{data.title}</span>
+        <strong>{data.count}</strong>
+      </div>
+      {data.groupId && graphActions.addToGroup ? (
+        <button
+          type="button"
+          className="v4-stage-group-add"
+          onClick={(e) => {
+            e.stopPropagation();
+            graphActions.addToGroup!(data.groupId!);
+          }}
+          title={`Add step to ${data.title}`}
+        >
+          <IconPlus size={12} />
+          Add step
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function PipelineNode({
   data,
   selected,
@@ -318,6 +387,7 @@ function PipelineNode({
   section: string | null;
   stages: string[];
   summary: string;
+  stageIndex?: number;
   sourcePosition?: Position;
   targetPosition?: Position;
 }>) {
@@ -348,6 +418,47 @@ function PipelineNode({
           <div className="v4-node-summary">{data.summary}</div>
         </div>
       </div>
+      {data.stageIndex !== undefined && graphActions.removeStage ? (
+        <div className="v4-node-actions">
+          {graphActions.moveStage ? (
+            <>
+              <button
+                type="button"
+                className="v4-node-action-btn"
+                title="Move step up"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  graphActions.moveStage!(data.stageIndex!, -1);
+                }}
+              >
+                <IconArrowUp size={12} />
+              </button>
+              <button
+                type="button"
+                className="v4-node-action-btn"
+                title="Move step down"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  graphActions.moveStage!(data.stageIndex!, 1);
+                }}
+              >
+                <IconArrowDown size={12} />
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            className="v4-node-action-btn v4-node-action-btn-remove"
+            title="Remove step"
+            onClick={(e) => {
+              e.stopPropagation();
+              graphActions.removeStage!(data.stageIndex!);
+            }}
+          >
+            <IconMinus size={12} />
+          </button>
+        </div>
+      ) : null}
       <Handle
         type="source"
         position={data.sourcePosition ?? Position.Right}
@@ -358,51 +469,36 @@ function PipelineNode({
   );
 }
 
-function StageGroupNode({
-  data,
-}: NodeProps<{
-  title: string;
-  count: number;
-  accent: string;
-  active?: boolean;
-}>) {
-  return (
-    <div
-      className={`v4-stage-group ${data.active ? "v4-stage-group-active" : ""}`}
-      style={{ ["--group-accent" as any]: data.accent }}
-    >
-      <div className="v4-stage-group-header">
-        <span>{data.title}</span>
-        <strong>{data.count}</strong>
-      </div>
-    </div>
-  );
-}
-
-function InsertNode() {
-  return (
-    <div
-      className="v4-insert-node"
-      title="Add pipeline step"
-      aria-label="Add pipeline step"
-    >
-      <span className="v4-insert-cross" aria-hidden="true" />
-    </div>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /*  Step picker                                                        */
 /* ------------------------------------------------------------------ */
 function StepPickerModal({
   stages,
+  targetGroupId,
   onSelect,
   onClose,
 }: {
   stages: AvailableStep[];
+  targetGroupId?: string | null;
   onSelect: (stageId: string) => void;
   onClose: () => void;
 }) {
+  const grouped = useMemo(() => {
+    const map = new Map<string, AvailableStep[]>();
+    for (const stage of stages) {
+      const info = STAGE_CATALOG[stage.id];
+      const groupId = info?.visualGroup ?? "custom";
+      const list = map.get(groupId) ?? [];
+      list.push(stage);
+      map.set(groupId, list);
+    }
+    return map;
+  }, [stages]);
+
+  const targetGroup = targetGroupId
+    ? VISUAL_GROUPS_META.find((g) => g.id === targetGroupId)
+    : null;
+
   return (
     <div className="v4-picker-overlay" onClick={onClose}>
       <div className="v4-picker" onClick={(e) => e.stopPropagation()}>
@@ -412,20 +508,46 @@ function StepPickerModal({
             &times;
           </button>
         </div>
-        <div className="v4-picker-list">
-          {stages.map((stage) => (
-            <button
-              key={stage.id}
-              type="button"
-              className="v4-picker-item"
-              onClick={() => onSelect(stage.id)}
-            >
-              <div className="v4-picker-item-name">{stage.name}</div>
-              <div className="v4-picker-item-desc">
-                {stage.provider} / {stage.description}
+        {targetGroup ? (
+          <div className="v4-picker-context">
+            Adding to <strong style={{ color: targetGroup.accent }}>{targetGroup.title}</strong> stage group
+          </div>
+        ) : null}
+        <div className="v4-picker-sections">
+          {VISUAL_GROUPS_META.map((group) => {
+            const groupStages = grouped.get(group.id);
+            if (!groupStages?.length) return null;
+            const isTarget = targetGroupId === group.id;
+            return (
+              <div
+                key={group.id}
+                className="v4-picker-section"
+                style={{ ["--section-accent" as any]: group.accent }}
+              >
+                <div className="v4-picker-section-header">
+                  {group.title}
+                  {isTarget ? (
+                    <span style={{ fontSize: "0.6rem", opacity: 0.7 }}>(selected)</span>
+                  ) : null}
+                </div>
+                <div className="v4-picker-list">
+                  {groupStages.map((stage) => (
+                    <button
+                      key={stage.id}
+                      type="button"
+                      className="v4-picker-item"
+                      onClick={() => onSelect(stage.id)}
+                    >
+                      <div className="v4-picker-item-name">{stage.name}</div>
+                      <div className="v4-picker-item-desc">
+                        {stage.provider} / {stage.description}
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </button>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -917,7 +1039,6 @@ function GraphToolbar() {
 const nodeTypes = {
   stageGroup: StageGroupNode,
   pipelineNode: PipelineNode,
-  insertNode: InsertNode,
 };
 
 const sectionTitles: Record<string, string> = {
@@ -944,12 +1065,140 @@ function fmtDate(iso: string) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Pipeline stages manager                                            */
+/* ------------------------------------------------------------------ */
+function PipelineStagesManager({
+  draft,
+  preview,
+  steps,
+  onSelectSection,
+  onAddToGroup,
+  onRemoveStage,
+  onMoveStage,
+}: {
+  draft: PipelineDocument;
+  preview: PreviewResponse | null;
+  steps: AvailableStep[];
+  onSelectSection: (section: string | null) => void;
+  onAddToGroup: (groupId: string) => void;
+  onRemoveStage: (index: number) => void;
+  onMoveStage: (index: number, direction: -1 | 1) => void;
+}) {
+  const stages = draft.stages ?? preview?.compiled_pipeline.stages ?? [];
+
+  const grouped = useMemo(() => {
+    const map = new Map<
+      string,
+      Array<{ stageId: string; index: number; step?: AvailableStep }>
+    >();
+    for (let i = 0; i < stages.length; i++) {
+      const stageId = stages[i];
+      const info = STAGE_CATALOG[stageId];
+      const groupId = info?.visualGroup ?? "custom";
+      const list = map.get(groupId) ?? [];
+      const step = steps.find((s) => s.id === stageId);
+      list.push({ stageId, index: i, step });
+      map.set(groupId, list);
+    }
+    return map;
+  }, [stages, steps]);
+
+  return (
+    <div className="v4-stages-manager">
+      <div className="v4-stages-manager-header">
+        <h3>Pipeline Stages</h3>
+        <span style={{ fontSize: "0.65rem", color: "#64748b" }}>
+          {stages.length} step{stages.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+      <div className="v4-stages-groups">
+        {VISUAL_GROUPS_META.map((group) => {
+          const items = grouped.get(group.id) ?? [];
+          return (
+            <div
+              key={group.id}
+              className="v4-stages-group"
+              style={{ ["--group-accent" as any]: group.accent }}
+            >
+              <div className="v4-stages-group-header">
+                <span>{group.title}</span>
+                <strong>{items.length}</strong>
+              </div>
+              <div className="v4-stages-group-list">
+                {items.map(({ stageId, index, step }) => (
+                  <div
+                    key={stageId}
+                    className="v4-stages-group-item"
+                    onClick={() => {
+                      const section = STAGE_CATALOG[stageId]?.section ?? null;
+                      if (section) onSelectSection(section);
+                    }}
+                    title={step?.description ?? ""}
+                  >
+                    <span className="v4-stages-group-item-name">
+                      {step?.name ?? stageId.replace("Stage", "")}
+                    </span>
+                    <div className="v4-stages-group-item-actions">
+                      <button
+                        type="button"
+                        className="v4-stages-group-item-action"
+                        title="Move step up"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMoveStage(index, -1);
+                        }}
+                      >
+                        <IconArrowUp size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        className="v4-stages-group-item-action"
+                        title="Move step down"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMoveStage(index, 1);
+                        }}
+                      >
+                        <IconArrowDown size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        className="v4-stages-group-item-action v4-stages-group-item-action-remove"
+                        title="Remove step"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRemoveStage(index);
+                        }}
+                      >
+                        <IconMinus size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="v4-stages-group-add"
+                onClick={() => onAddToGroup(group.id)}
+              >
+                <IconPlus size={12} />
+                Add step
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 export default function V4GraphCentric() {
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [insertAtIndex, setInsertAtIndex] = useState<number>(-1);
+  const [pickerTargetGroup, setPickerTargetGroup] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [opencodeSettings, setOpencodeSettings] =
     useState<OpenCodeSettings | null>(null);
@@ -1042,17 +1291,29 @@ export default function V4GraphCentric() {
     (
       _event: unknown,
       node: {
-        data?: { section?: string; isInsert?: boolean; insertAtIndex?: number };
+        data?: { section?: string };
       },
     ) => {
-      if (node.data?.isInsert) {
-        setInsertAtIndex(node.data.insertAtIndex ?? 0);
-        setPickerOpen(true);
-        return;
-      }
       if (node.data?.section) {
         setSelectedSection(node.data.section);
       }
+    },
+    [],
+  );
+
+  const computeInsertIndexForGroup = useCallback(
+    (groupId: string, stages: string[]): number => {
+      const groupOrder: string[] = VISUAL_GROUPS_META.map((g) => g.id);
+      const targetGroupIndex = groupOrder.indexOf(groupId);
+      let lastStageIndex = -1;
+      for (let i = 0; i < stages.length; i++) {
+        const stageGroup = STAGE_CATALOG[stages[i]]?.visualGroup ?? "custom";
+        const stageGroupIndex = groupOrder.indexOf(stageGroup);
+        if (stageGroupIndex <= targetGroupIndex) {
+          lastStageIndex = i;
+        }
+      }
+      return lastStageIndex + 1;
     },
     [],
   );
@@ -1064,7 +1325,10 @@ export default function V4GraphCentric() {
       const currentStages =
         draft.stages ?? preview.compiled_pipeline.stages;
       const newStages = [...currentStages];
-      newStages.splice(insertAtIndex, 0, stageId);
+      const insertIndex = pickerTargetGroup
+        ? computeInsertIndexForGroup(pickerTargetGroup, currentStages)
+        : newStages.length;
+      newStages.splice(insertIndex, 0, stageId);
       updateDraft((c) => {
         c.stages = newStages;
         if (step) {
@@ -1090,8 +1354,17 @@ export default function V4GraphCentric() {
         return c;
       });
       setPickerOpen(false);
+      setPickerTargetGroup(null);
     },
-    [draft, preview, metadata, insertAtIndex, updateDraft],
+    [draft, preview, metadata, pickerTargetGroup, computeInsertIndexForGroup, updateDraft],
+  );
+
+  const handleAddStageToGroup = useCallback(
+    (groupId: string) => {
+      setPickerTargetGroup(groupId);
+      setPickerOpen(true);
+    },
+    [],
   );
 
   const handleRemoveStage = useCallback(
@@ -1118,6 +1391,32 @@ export default function V4GraphCentric() {
     },
     [draft, preview, updateDraft],
   );
+
+  const handleMoveStage = useCallback(
+    (stageIndex: number, direction: -1 | 1) => {
+      if (!draft || !preview) return;
+      const currentStages =
+        draft.stages ?? preview.compiled_pipeline.stages;
+      const swapIndex = stageIndex + direction;
+      if (swapIndex < 0 || swapIndex >= currentStages.length) return;
+      const newStages = [...currentStages];
+      const temp = newStages[stageIndex];
+      newStages[stageIndex] = newStages[swapIndex]!;
+      newStages[swapIndex] = temp!;
+      updateDraft((c) => {
+        c.stages = newStages;
+        return c;
+      });
+    },
+    [draft, preview, updateDraft],
+  );
+
+  useEffect(() => {
+    graphActions.addToGroup = handleAddStageToGroup;
+    graphActions.removeStage = handleRemoveStage;
+    graphActions.moveStage = handleMoveStage;
+    graphActions.selectSection = setSelectedSection;
+  }, [handleAddStageToGroup, handleRemoveStage, handleMoveStage]);
 
   const openSettings = useCallback(async () => {
     setSettingsOpen(true);
@@ -1358,8 +1657,12 @@ export default function V4GraphCentric() {
               {pickerOpen && metadata && (
                 <StepPickerModal
                   stages={metadata.available_steps}
+                  targetGroupId={pickerTargetGroup}
                   onSelect={handleAddStage}
-                  onClose={() => setPickerOpen(false)}
+                  onClose={() => {
+                    setPickerOpen(false);
+                    setPickerTargetGroup(null);
+                  }}
                 />
               )}
               {settingsOpen && (
@@ -1486,6 +1789,17 @@ export default function V4GraphCentric() {
                       </ul>
                     </div>
                   </div>
+                  {metadata && (
+                    <PipelineStagesManager
+                      draft={draft}
+                      preview={preview}
+                      steps={metadata.available_steps}
+                      onSelectSection={setSelectedSection}
+                      onAddToGroup={handleAddStageToGroup}
+                      onRemoveStage={handleRemoveStage}
+                      onMoveStage={handleMoveStage}
+                    />
+                  )}
                 </div>
               ) : (
                 <div className="v4-editor-content">
