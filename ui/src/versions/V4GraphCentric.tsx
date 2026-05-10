@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { Link } from "react-router-dom";
 import ReactFlow, {
   Background,
   Handle,
@@ -29,10 +30,10 @@ const graphActions = {
 };
 
 const VISUAL_GROUPS_META = [
-  { id: "repoPrep", title: "Prepare", accent: "#a3e635" },
-  { id: "agentRun", title: "Agent", accent: "#38bdf8" },
-  { id: "publishing", title: "Publish", accent: "#22c55e" },
-  { id: "custom", title: "Custom", accent: "#a78bfa" },
+  { id: "repoPrep", title: "Prepare", accent: "#a3e635", help: "Resolve the GitLab event, choose the commit, clone the repo, and collect context before the agent runs." },
+  { id: "agentRun", title: "Agent", accent: "#38bdf8", help: "Run OpenCode with the selected agent, model, and prompt template." },
+  { id: "publishing", title: "Publish", accent: "#22c55e", help: "Post the answer and attach any generated artifacts back to GitLab." },
+  { id: "custom", title: "Custom", accent: "#a78bfa", help: "Optional extension points for project-specific behavior." },
 ] as const;
 
 /* ------------------------------------------------------------------ */
@@ -503,7 +504,10 @@ function StepPickerModal({
     <div className="v4-picker-overlay" onClick={onClose}>
       <div className="v4-picker" onClick={(e) => e.stopPropagation()}>
         <div className="v4-picker-header">
-          <h3>Add Pipeline Step</h3>
+          <div>
+            <h3>Add Pipeline Step</h3>
+            <p>Pick the next operation this pipeline should run. Steps execute from left to right in the graph.</p>
+          </div>
           <button className="v4-btn-ghost" type="button" onClick={onClose}>
             &times;
           </button>
@@ -525,11 +529,10 @@ function StepPickerModal({
                 style={{ ["--section-accent" as any]: group.accent }}
               >
                 <div className="v4-picker-section-header">
-                  {group.title}
-                  {isTarget ? (
-                    <span style={{ fontSize: "0.6rem", opacity: 0.7 }}>(selected)</span>
-                  ) : null}
+                  <span>{group.title}</span>
+                  {isTarget ? <strong>selected</strong> : null}
                 </div>
+                <p className="v4-picker-section-help">{group.help}</p>
                 <div className="v4-picker-list">
                   {groupStages.map((stage) => (
                     <button
@@ -721,6 +724,9 @@ function StepConfigurationPanel({
               </div>
             ) : null}
             <div className="v4-context-box">
+              <p className="v4-context-help">
+                Context is the data this step passes to later steps. Keep it flowing unless you are isolating a custom step.
+              </p>
               <div className="v4-context-columns">
                 <label className="v4-field v4-check">
                   <input
@@ -731,6 +737,7 @@ function StepConfigurationPanel({
                     }
                   />
                   <span>Pass context forward</span>
+                  <FieldHint>Make this step's output available to the next step.</FieldHint>
                 </label>
                 <label className="v4-field v4-check">
                   <input
@@ -741,6 +748,7 @@ function StepConfigurationPanel({
                     }
                   />
                   <span>Write context file</span>
+                  <FieldHint>Also save the context into the workspace for the agent or later tooling.</FieldHint>
                 </label>
                 <label className="v4-field">
                   <span>Workspace file</span>
@@ -751,6 +759,7 @@ function StepConfigurationPanel({
                       updateContext(step.id, "filename", e.target.value)
                     }
                   />
+                  <FieldHint>Optional path, for example context/issue.md.</FieldHint>
                 </label>
               </div>
               <div className="v4-context-tags">
@@ -777,12 +786,14 @@ function OpenCodePicker({
   value,
   options,
   customLabel,
+  hint,
   onChange,
 }: {
   label: string;
   value: string;
   options: Array<{ name: string; detail?: string }>;
   customLabel: string;
+  hint?: string;
   onChange: (value: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -808,6 +819,7 @@ function OpenCodePicker({
         placeholder={`Search or add ${label.toLowerCase()}`}
         onChange={(e) => setQuery(e.target.value)}
       />
+      {hint ? <FieldHint>{hint}</FieldHint> : null}
       <div className="v4-option-list">
         {filteredOptions.map((option) => (
           <button
@@ -978,9 +990,6 @@ function ZoomPanel() {
   const zoom = useStore((s) => s.transform[2]);
   return (
     <Panel position="top-right" className="v4-zoom-panel">
-      <button className="v4-zoom-btn" title="Search">
-        <IconSearch size={14} />
-      </button>
       <button className="v4-zoom-btn" onClick={() => zoomOut()} title="Zoom out">
         <IconMinus size={14} />
       </button>
@@ -1026,9 +1035,6 @@ function GraphToolbar() {
       >
         <IconFitView size={16} />
       </button>
-      <button className="v4-tool-btn" title="Lock">
-        <IconLock size={16} />
-      </button>
     </Panel>
   );
 }
@@ -1050,6 +1056,26 @@ const sectionTitles: Record<string, string> = {
   execution: "Execution",
   output: "Output + Posting",
 };
+
+const sectionHelp: Record<string, string> = {
+  basics: "Give the pipeline a stable ID and readable name. Keep it disabled until validation is clean and the trigger is unique.",
+  trigger: "Choose what GitLab event starts this pipeline. Slash commands usually need a command like /oc_review plus the bot mention target.",
+  filters: "Leave filters empty to allow every project and branch. Add comma-separated values when this pipeline should only run in specific places.",
+  workspace: "These settings decide what code the agent sees. For merge requests, source_branch is the normal checkout strategy.",
+  preparation: "Preparation can run repo hooks or OpenCode setup before the agent. Only allow dependency installation for repositories you trust.",
+  execution: "Pick the behavior preset, OpenCode agent, model, and the prompt text sent to the agent. The note body placeholder is useful for slash-command replies.",
+  output: "Choose whether GitLab gets a fresh comment or a progress comment, and whether generated artifacts are linked in the final note.",
+};
+
+function FieldHint({ children }: { children: React.ReactNode }) {
+  return <small className="v4-field-help">{children}</small>;
+}
+
+function SectionHelp({ section }: { section: string }) {
+  const help = sectionHelp[section];
+  if (!help) return null;
+  return <p className="v4-section-help">{help}</p>;
+}
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -1124,6 +1150,7 @@ function PipelineStagesManager({
                 <span>{group.title}</span>
                 <strong>{items.length}</strong>
               </div>
+              <p className="v4-stages-group-help">{group.help}</p>
               <div className="v4-stages-group-list">
                 {items.map(({ stageId, index, step }) => (
                   <div
@@ -1516,7 +1543,7 @@ export default function V4GraphCentric() {
       <aside className="v4-sidebar">
         <div className="v4-sidebar-header">
           <h1>Pipeline Admin</h1>
-          <p>Graph-centric editor</p>
+          <p>Create a pipeline, click a graph node to edit that section, then save when validation is clean.</p>
         </div>
         <button
           className="v4-btn v4-btn-primary"
@@ -1607,6 +1634,10 @@ export default function V4GraphCentric() {
                   <IconSettings size={14} />
                   Settings
                 </button>
+                <Link className="v4-btn" to="/onboarding">
+                  <IconPlug size={14} />
+                  Onboarding
+                </Link>
                 <button
                   className="v4-btn v4-btn-primary"
                   type="button"
@@ -1758,6 +1789,15 @@ export default function V4GraphCentric() {
                         <span>{draft.id}</span>
                       </div>
                     </div>
+                    <div className="v4-first-run">
+                      <div className="v4-first-run-title">First-time setup path</div>
+                      <ol>
+                        <li>Open Pipeline Basics and set a clear name, ID, and description.</li>
+                        <li>Open Trigger Configuration and choose the command or event that starts the run.</li>
+                        <li>Check Execution for the agent, model, and question template.</li>
+                        <li>Review Pipeline Stages below, then enable and save the pipeline.</li>
+                      </ol>
+                    </div>
                   </div>
                   <div className="v4-feedback-inline">
                     <div className="v4-feedback-block v4-feedback-valid">
@@ -1804,9 +1844,12 @@ export default function V4GraphCentric() {
               ) : (
                 <div className="v4-editor-content">
                   <div className="v4-editor-topbar">
-                    <h3>
-                      {sectionTitles[selectedSection] ?? selectedSection}
-                    </h3>
+                    <div>
+                      <h3>
+                        {sectionTitles[selectedSection] ?? selectedSection}
+                      </h3>
+                      <SectionHelp section={selectedSection} />
+                    </div>
                     <div
                       style={{
                         display: "flex",
@@ -1871,6 +1914,7 @@ export default function V4GraphCentric() {
                             })
                           }
                         />
+                        <FieldHint>Shown in the admin list and GitLab-facing summaries.</FieldHint>
                       </label>
                       <label className="v4-field">
                         <span>Pipeline ID</span>
@@ -1883,6 +1927,7 @@ export default function V4GraphCentric() {
                             })
                           }
                         />
+                        <FieldHint>Stable machine name used by the API and stored configuration.</FieldHint>
                       </label>
                       <label
                         className="v4-field"
@@ -1899,6 +1944,7 @@ export default function V4GraphCentric() {
                             })
                           }
                         />
+                        <FieldHint>Write when this pipeline should be used; it helps future admins pick the right one.</FieldHint>
                       </label>
                       <label className="v4-field v4-check">
                         <input
@@ -1912,6 +1958,7 @@ export default function V4GraphCentric() {
                           }
                         />
                         <span>Enabled</span>
+                        <FieldHint>Disabled pipelines can be edited and saved but will not run from GitLab events.</FieldHint>
                       </label>
                     </div>
                   )}
@@ -1946,6 +1993,7 @@ export default function V4GraphCentric() {
                             </option>
                           ))}
                         </select>
+                        <FieldHint>Slash commands react to bot commands; events react to GitLab issue or merge request activity.</FieldHint>
                       </label>
                       <label className="v4-field">
                         <span>Scope</span>
@@ -1964,6 +2012,7 @@ export default function V4GraphCentric() {
                             </option>
                           ))}
                         </select>
+                        <FieldHint>Limits whether this pipeline can run on issues, merge requests, or both.</FieldHint>
                       </label>
                       <label className="v4-field">
                         <span>Command Text</span>
@@ -1976,6 +2025,7 @@ export default function V4GraphCentric() {
                             })
                           }
                         />
+                        <FieldHint>For slash commands, include the leading slash, for example /oc_review.</FieldHint>
                       </label>
                       <label className="v4-field">
                         <span>Mention Target</span>
@@ -1988,6 +2038,7 @@ export default function V4GraphCentric() {
                             })
                           }
                         />
+                        <FieldHint>The bot mention that should be recognized with commands, for example @nid-bugbard.</FieldHint>
                       </label>
                     </div>
                   )}
@@ -2007,6 +2058,7 @@ export default function V4GraphCentric() {
                             })
                           }
                         />
+                        <FieldHint>Comma-separated GitLab project paths or IDs. Empty means every project is allowed.</FieldHint>
                       </label>
                       <label className="v4-field">
                         <span>Branch Patterns</span>
@@ -2021,6 +2073,52 @@ export default function V4GraphCentric() {
                             })
                           }
                         />
+                        <FieldHint>Comma-separated branch names or patterns. Empty means every branch is allowed.</FieldHint>
+                      </label>
+                      <label className="v4-field">
+                        <span>Label Filters</span>
+                        <input
+                          value={draft.filters.labelFilters.join(", ")}
+                          onChange={(e) =>
+                            updateDraft((c) => {
+                              c.filters.labelFilters = commaSeparated(
+                                e.target.value,
+                              );
+                              return c;
+                            })
+                          }
+                        />
+                        <FieldHint>Comma-separated GitLab labels that must be present for this pipeline to run.</FieldHint>
+                      </label>
+                      <label className="v4-field">
+                        <span>Author Allowlist</span>
+                        <input
+                          value={draft.filters.authorAllowlist.join(", ")}
+                          onChange={(e) =>
+                            updateDraft((c) => {
+                              c.filters.authorAllowlist = commaSeparated(
+                                e.target.value,
+                              );
+                              return c;
+                            })
+                          }
+                        />
+                        <FieldHint>Comma-separated GitLab usernames allowed to trigger this pipeline. Empty allows any author.</FieldHint>
+                      </label>
+                      <label className="v4-field">
+                        <span>Author Denylist</span>
+                        <input
+                          value={draft.filters.authorDenylist.join(", ")}
+                          onChange={(e) =>
+                            updateDraft((c) => {
+                              c.filters.authorDenylist = commaSeparated(
+                                e.target.value,
+                              );
+                              return c;
+                            })
+                          }
+                        />
+                        <FieldHint>Comma-separated GitLab usernames that should never trigger this pipeline.</FieldHint>
                       </label>
                     </div>
                   )}
@@ -2044,6 +2142,7 @@ export default function V4GraphCentric() {
                             </option>
                           ))}
                         </select>
+                        <FieldHint>fresh_clone creates a clean workspace for each run.</FieldHint>
                       </label>
                       <label className="v4-field">
                         <span>Checkout Strategy</span>
@@ -2062,6 +2161,7 @@ export default function V4GraphCentric() {
                             </option>
                           ))}
                         </select>
+                        <FieldHint>source_branch checks out the merge request source branch; explicit_ref uses a configured ref when available.</FieldHint>
                       </label>
                       <label className="v4-field v4-check">
                         <input
@@ -2075,6 +2175,7 @@ export default function V4GraphCentric() {
                           }
                         />
                         <span>Cleanup after run</span>
+                        <FieldHint>Deletes temporary workspace files after the pipeline finishes.</FieldHint>
                       </label>
                     </div>
                   )}
@@ -2094,6 +2195,7 @@ export default function V4GraphCentric() {
                           }
                         />
                         <span>Enable repo hook</span>
+                        <FieldHint>Runs repository-provided preparation logic before the agent step.</FieldHint>
                       </label>
                       <label className="v4-field v4-check">
                         <input
@@ -2108,6 +2210,7 @@ export default function V4GraphCentric() {
                           }
                         />
                         <span>Enable OpenCode preparation</span>
+                        <FieldHint>Runs OpenCode setup before execution, such as creating config or resolving command metadata.</FieldHint>
                       </label>
                       <label className="v4-field v4-check">
                         <input
@@ -2122,6 +2225,7 @@ export default function V4GraphCentric() {
                           }
                         />
                         <span>Allow dependency install</span>
+                        <FieldHint>Allows preparation to install project dependencies. Use only for trusted repositories.</FieldHint>
                       </label>
                     </div>
                   )}
@@ -2146,12 +2250,14 @@ export default function V4GraphCentric() {
                             </option>
                           ))}
                         </select>
+                        <FieldHint>Sets the built-in behavior family. Changing it also updates the execution mode.</FieldHint>
                       </label>
                       <OpenCodePicker
                         label="Agent"
                         value={draft.execution.agentName}
                         options={agentOptions}
                         customLabel="Use custom agent"
+                        hint="The agent defines which OpenCode prompt/config profile runs."
                         onChange={(value) =>
                           updateDraft((c) => {
                             c.execution.agentName = value;
@@ -2164,6 +2270,7 @@ export default function V4GraphCentric() {
                         value={draft.execution.modelName}
                         options={modelOptions}
                         customLabel="Add custom model"
+                        hint="Only visible models are listed. Use Settings to choose which OpenCode models appear here."
                         onChange={(value) =>
                           updateDraft((c) => {
                             c.execution.modelName = value;
@@ -2171,6 +2278,36 @@ export default function V4GraphCentric() {
                           })
                         }
                       />
+                      <label className="v4-field">
+                        <span>Timeout Seconds</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={draft.execution.timeoutSeconds}
+                          onChange={(e) =>
+                            updateDraft((c) => {
+                              c.execution.timeoutSeconds = Number(e.target.value);
+                              return c;
+                            })
+                          }
+                        />
+                        <FieldHint>Maximum runtime for one pipeline run before it is stopped.</FieldHint>
+                      </label>
+                      <label className="v4-field">
+                        <span>Max Concurrent Runs</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={draft.execution.maxConcurrentRuns}
+                          onChange={(e) =>
+                            updateDraft((c) => {
+                              c.execution.maxConcurrentRuns = Number(e.target.value);
+                              return c;
+                            })
+                          }
+                        />
+                        <FieldHint>How many matching GitLab events can run this pipeline at the same time.</FieldHint>
+                      </label>
                       <label
                         className="v4-field"
                         style={{ gridColumn: "1 / -1" }}
@@ -2186,6 +2323,7 @@ export default function V4GraphCentric() {
                             })
                           }
                         />
+                        <FieldHint>Template sent to the agent. Use {"{{note_body_without_trigger}}"} to pass the user's command text without the trigger.</FieldHint>
                       </label>
                     </div>
                   )}
@@ -2209,6 +2347,7 @@ export default function V4GraphCentric() {
                             </option>
                           ))}
                         </select>
+                        <FieldHint>new_note creates a separate reply; update_progress_note edits the pipeline progress note when supported.</FieldHint>
                       </label>
                       <label className="v4-field v4-check">
                         <input
@@ -2223,6 +2362,36 @@ export default function V4GraphCentric() {
                           }
                         />
                         <span>Include artifacts in note</span>
+                        <FieldHint>Links rendered replies, logs, or saved context files in the GitLab response.</FieldHint>
+                      </label>
+                      <label className="v4-field v4-check">
+                        <input
+                          type="checkbox"
+                          checked={draft.output.keepEventsJsonl}
+                          onChange={(e) =>
+                            updateDraft((c) => {
+                              c.output.keepEventsJsonl = e.target.checked;
+                              return c;
+                            })
+                          }
+                        />
+                        <span>Keep events JSONL</span>
+                        <FieldHint>Stores the OpenCode event stream as a run artifact for debugging.</FieldHint>
+                      </label>
+                      <label className="v4-field v4-check">
+                        <input
+                          type="checkbox"
+                          checked={draft.output.keepRenderedReplyMarkdown}
+                          onChange={(e) =>
+                            updateDraft((c) => {
+                              c.output.keepRenderedReplyMarkdown =
+                                e.target.checked;
+                              return c;
+                            })
+                          }
+                        />
+                        <span>Keep rendered reply</span>
+                        <FieldHint>Stores the final Markdown response before it is posted to GitLab.</FieldHint>
                       </label>
                     </div>
                   )}
