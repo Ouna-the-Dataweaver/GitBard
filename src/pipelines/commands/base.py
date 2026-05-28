@@ -4,6 +4,11 @@ from typing import Any
 from ..base import Pipeline, PreparationConfig, WorkspaceConfig
 from ..builder import PipelineBuildConfig, STAGE_BLOCKS, build_pipeline, resolve_stage_ids
 
+try:
+    from src.opencode_command import DEFAULT_OPENCODE_MODEL
+except ModuleNotFoundError:
+    from opencode_command import DEFAULT_OPENCODE_MODEL
+
 
 class Command(ABC):
     """Base class for all commands"""
@@ -108,7 +113,7 @@ class Command(ABC):
             step_settings["OpencodeIntegrationStage"] = {
                 **step_settings.get("OpencodeIntegrationStage", {}),
                 "agentName": self.agent_name,
-                "modelName": "minimax/MiniMax-M2.7",
+                "modelName": DEFAULT_OPENCODE_MODEL,
             }
         return {
             "id": self.admin_document_id(),
@@ -132,7 +137,7 @@ class Command(ABC):
             "execution": {
                 "mode": self.preset,
                 "agentName": self.agent_name,
-                "modelName": "minimax/MiniMax-M2.7",
+                "modelName": DEFAULT_OPENCODE_MODEL,
                 "questionTemplate": "{{note_body_without_trigger}}",
                 "timeoutSeconds": self.timeout_seconds,
                 "maxConcurrentRuns": 1,

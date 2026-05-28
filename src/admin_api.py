@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from src.opencode_command import opencode_command_args
+from src.opencode_command import DEFAULT_OPENCODE_MODEL, opencode_command_args
 from src.pipelines.builder import (
     PipelineBuildConfig,
     STAGE_BLOCKS,
@@ -38,7 +38,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _OPENCODE_CONFIG_PATH = _REPO_ROOT / "opencode.json"
 _ADMIN_SETTINGS_PATH = _REPO_ROOT / ".gitbard_admin_settings.json"
 _DEFAULT_MODELS = [
-    "minimax/MiniMax-M2.7",
+    DEFAULT_OPENCODE_MODEL,
     "openai/gpt-5.4",
     "anthropic/claude-sonnet-4.5",
 ]
@@ -78,7 +78,7 @@ def _default_pipeline_document() -> dict[str, Any]:
         "execution": {
             "mode": "review",
             "agentName": "gitlab-review",
-            "modelName": "minimax/MiniMax-M2.7",
+            "modelName": DEFAULT_OPENCODE_MODEL,
             "questionTemplate": "{{note_body_without_trigger}}",
             "timeoutSeconds": 1800,
             "maxConcurrentRuns": 1,

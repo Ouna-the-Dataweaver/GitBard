@@ -4,6 +4,7 @@ import os
 import shlex
 
 DEFAULT_OPENCODE_COMMAND = "opencode"
+DEFAULT_OPENCODE_MODEL = "zai-coding-plan/glm-5.1"
 
 
 def opencode_command_args(*args: str) -> list[str]:

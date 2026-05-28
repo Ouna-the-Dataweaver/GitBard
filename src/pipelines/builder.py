@@ -5,6 +5,11 @@ from typing import Any, Callable
 
 from .base import Pipeline, PreparationConfig, Stage, WorkspaceConfig
 
+try:
+    from src.opencode_command import DEFAULT_OPENCODE_MODEL
+except ModuleNotFoundError:
+    from opencode_command import DEFAULT_OPENCODE_MODEL
+
 
 @dataclass(frozen=True)
 class StageBlock:
@@ -238,7 +243,7 @@ STAGE_BLOCKS: dict[str, StageBlock] = {
                 "key": "modelName",
                 "label": "Model",
                 "type": "model",
-                "default": "minimax/MiniMax-M2.7",
+                "default": DEFAULT_OPENCODE_MODEL,
             },
         ),
         context_schema={

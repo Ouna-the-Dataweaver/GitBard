@@ -200,7 +200,7 @@ export function usePipelineEditor() {
         execution: {
           mode: "review",
           agentName: metadata?.agents[0] ?? "gitlab-review",
-          modelName: metadata?.models[0] ?? "minimax/MiniMax-M2.7",
+          modelName: metadata?.models[0] ?? "zai-coding-plan/glm-5.1",
           questionTemplate: "{{note_body_without_trigger}}",
           timeoutSeconds: 1800,
           maxConcurrentRuns: 1,
