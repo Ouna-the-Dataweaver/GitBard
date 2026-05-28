@@ -1,7 +1,13 @@
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
 import logging
+import os
 import shutil
+
+try:
+    from src.gitlab_api import extract_noteable_iid, post_gitlab_note
+except ModuleNotFoundError:
+    from gitlab_api import extract_noteable_iid, post_gitlab_note
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +94,8 @@ class Pipeline:
         logger.info(f"Starting pipeline: {self.name}")
 
         try:
-            for stage in self.stages:
+            for index, stage in enumerate(self.stages):
+                self._publish_progress(context, stage)
                 result = stage.execute(context)
                 context = result.context
 
@@ -98,6 +105,7 @@ class Pipeline:
                         logger.error(
                             f"Pipeline {self.name} stopped with error: {result.error}"
                         )
+                        self._publish_error(context, self.stages[index + 1 :])
                     else:
                         logger.info(f"Pipeline {self.name} stopped early")
                     return result
@@ -109,3 +117,63 @@ class Pipeline:
                 path = getattr(context, attr_name, None)
                 if path and context.workspace_cleanup_required:
                     shutil.rmtree(path, ignore_errors=True)
+
+    def _publish_error(
+        self, context: PipelineContext, remaining_stages: List[Stage]
+    ) -> None:
+        for stage in remaining_stages:
+            if stage.__class__.__name__ != "NoteUpdaterStage":
+                continue
+
+            result = stage.execute(context)
+            if not result.success:
+                logger.error(
+                    "Pipeline %s failed to publish error: %s", self.name, result.error
+                )
+            return
+
+    def _publish_progress(self, context: PipelineContext, stage: Stage) -> None:
+        if os.getenv("GITBARD_PROGRESS_NOTES", "1").lower() in {"0", "false", "no"}:
+            return
+
+        stage_name = stage.__class__.__name__
+        if stage_name in {"HookResolverStage", "NoteUpdaterStage"}:
+            return
+
+        payload = context.webhook_payload
+        project_id = payload.get("project", {}).get("id")
+        noteable_type = context.metadata.get("noteable_type")
+        noteable_iid = extract_noteable_iid(payload)
+        if not project_id or not noteable_type or not noteable_iid:
+            return
+
+        message = self._progress_message(stage_name, stage)
+        if not message:
+            return
+
+        try:
+            post_gitlab_note(
+                project_id,
+                noteable_type,
+                noteable_iid,
+                message,
+                project=payload.get("project"),
+            )
+        except Exception:
+            logger.exception("Pipeline %s failed to publish progress note", self.name)
+
+    def _progress_message(self, stage_name: str, stage: Stage) -> str:
+        messages = {
+            "SnapshotResolverStage": "🤖 OpenCode progress: resolving target revision.",
+            "WorkspaceAcquisitionStage": "🤖 OpenCode progress: preparing workspace.",
+            "IssueContextFetcherStage": "🤖 OpenCode progress: collecting GitLab context.",
+            "WorkspacePreparationStage": "🤖 OpenCode progress: running preparation.",
+        }
+        if stage_name == "OpencodeIntegrationStage":
+            model = getattr(stage, "model", "unknown")
+            agent = getattr(stage, "agent", "unknown")
+            return (
+                "🤖 OpenCode progress: running model "
+                f"`{model}` with agent `{agent}`."
+            )
+        return messages.get(stage_name, "")
