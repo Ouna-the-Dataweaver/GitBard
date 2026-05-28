@@ -1,7 +1,20 @@
+import sys
 from unittest.mock import MagicMock
 
 from src.pipelines.base import PipelineContext
-from src.pipelines.stages.opencode_integration import OpencodeIntegrationStage
+from src.pipelines.stages.opencode_integration import (
+    BaseOpencodeStage,
+    OpencodeErrorDetector,
+    OpencodeIntegrationStage,
+    summarize_opencode_error,
+)
+
+
+def _patch_opencode_stream(monkeypatch, handler):
+    monkeypatch.setattr(
+        "src.pipelines.stages.opencode_integration.BaseOpencodeStage._run_opencode_streaming",
+        handler,
+    )
 
 
 def test_opencode_integration_uses_question_and_issue_context(monkeypatch, tmp_path):
@@ -20,7 +33,7 @@ def test_opencode_integration_uses_question_and_issue_context(monkeypatch, tmp_p
     stage = OpencodeIntegrationStage()
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text, env):
+    def fake_run(self, args, cwd, env, detector):
         captured["args"] = args
         captured["cwd"] = cwd
         captured["env"] = env
@@ -31,7 +44,7 @@ def test_opencode_integration_uses_question_and_issue_context(monkeypatch, tmp_p
             stderr="",
         )
 
-    monkeypatch.setattr("src.pipelines.stages.opencode_integration.subprocess.run", fake_run)
+    _patch_opencode_stream(monkeypatch, fake_run)
 
     result = stage.execute(context)
 
@@ -70,11 +83,11 @@ def test_opencode_integration_includes_prep_report_when_present(monkeypatch, tmp
     stage = OpencodeIntegrationStage()
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text, env):
+    def fake_run(self, args, cwd, env, detector):
         captured["prompt"] = args[-1]
         return MagicMock(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("src.pipelines.stages.opencode_integration.subprocess.run", fake_run)
+    _patch_opencode_stream(monkeypatch, fake_run)
 
     result = stage.execute(context)
 
@@ -103,11 +116,11 @@ def test_opencode_integration_defaults_when_question_missing(monkeypatch, tmp_pa
     stage = OpencodeIntegrationStage()
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text, env):
+    def fake_run(self, args, cwd, env, detector):
         captured["prompt"] = args[-1]
         return MagicMock(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("src.pipelines.stages.opencode_integration.subprocess.run", fake_run)
+    _patch_opencode_stream(monkeypatch, fake_run)
 
     result = stage.execute(context)
 
@@ -141,18 +154,128 @@ def test_opencode_integration_uses_env_model_and_agent(monkeypatch, tmp_path):
     stage = OpencodeIntegrationStage()
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text, env):
+    def fake_run(self, args, cwd, env, detector):
         captured["args"] = args
         return MagicMock(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("src.pipelines.stages.opencode_integration.subprocess.run", fake_run)
+    _patch_opencode_stream(monkeypatch, fake_run)
 
     result = stage.execute(context)
 
     assert not result.should_stop
+    assert stage.model_source == "env"
+    assert stage.agent_source == "env"
     assert captured["args"][0] == "opencode-safe"
-    assert captured["args"][5] == "openai/gpt-4.1-mini"
-    assert captured["args"][7] == "Reviewer"
+    assert "--print-logs" in captured["args"]
+    assert captured["args"][captured["args"].index("--log-level") + 1] == "DEBUG"
+    assert (
+        captured["args"][captured["args"].index("--model") + 1]
+        == "openai/gpt-4.1-mini"
+    )
+    assert captured["args"][captured["args"].index("--agent") + 1] == "Reviewer"
+
+
+def test_opencode_error_detector_stops_after_repeated_provider_errors():
+    detector = OpencodeErrorDetector(max_errors=2)
+
+    assert not detector.observe(
+        "INFO service=llm providerID=minimax modelID=MiniMax-M2.7 stream"
+    )
+    assert detector.observed_provider == "minimax"
+    assert detector.observed_model == "MiniMax-M2.7"
+    assert not detector.observe("INFO service=provider init")
+    assert not detector.observe(
+        'ERROR service=llm error={"statusCode":429,"responseBody":"rate_limit_error"}'
+    )
+    assert detector.observe("ERROR service=llm error={\"name\":\"AI_APICallError\"}")
+    assert detector.error_count == 2
+    assert "AI_APICallError" in detector.last_error
+
+
+def test_opencode_error_summary_excludes_verbose_request_payload():
+    noisy_error = (
+        'ERROR service=llm providerID=minimax modelID=MiniMax-M2.7 '
+        'error={"requestBody":{"system":"full system prompt",'
+        '"tools":[{"name":"zai-vision_extract_text_from_screenshot",'
+        '"input_schema":{"properties":{"prompt":{"description":"huge schema"}}}}],'
+        '"tool_choice":{"type":"auto"}},"statusCode":429,'
+        '"responseBody":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":'
+        '\\"rate_limit_error\\",\\"message\\":\\"usage limit exceeded (2056)\\"},'
+        '\\"request_id\\":\\"0665ac5db826cbcccf3123e0f7848029\\"}",'
+        '"isRetryable":true} stream error'
+    )
+
+    summary = summarize_opencode_error(noisy_error)
+
+    assert "status=429" in summary
+    assert "type=rate_limit_error" in summary
+    assert "message=usage limit exceeded (2056)" in summary
+    assert "request_id=0665ac5db826cbcccf3123e0f7848029" in summary
+    assert "retryable=true" in summary
+    assert "full system prompt" not in summary
+    assert "input_schema" not in summary
+    assert "zai-vision" not in summary
+
+
+def test_opencode_integration_reports_summarized_failure(monkeypatch, tmp_path):
+    context = PipelineContext(
+        webhook_payload={},
+        local_context_path=str(tmp_path),
+        metadata={
+            "note_body": "/oc_ask check this",
+            "trigger_pattern": "/oc_ask",
+        },
+    )
+    stage = OpencodeIntegrationStage()
+
+    def fake_run(self, args, cwd, env, detector):
+        return MagicMock(
+            returncode=1,
+            stdout="",
+            stderr=(
+                'ERROR service=llm error={"requestBody":{"system":"secret prompt"},'
+                '"statusCode":429,"responseBody":"{\\"type\\":\\"error\\",'
+                '\\"error\\":{\\"type\\":\\"rate_limit_error\\",\\"message\\":'
+                '\\"usage limit exceeded (2056)\\"},\\"request_id\\":\\"req_123\\"}",'
+                '"isRetryable":true} stream error'
+            ),
+        )
+
+    _patch_opencode_stream(monkeypatch, fake_run)
+
+    result = stage.execute(context)
+
+    assert result.should_stop
+    error_text = str(result.error)
+    assert "opencode run failed" in error_text
+    assert "status=429" in error_text
+    assert "type=rate_limit_error" in error_text
+    assert "secret prompt" not in error_text
+    assert "requestBody" not in error_text
+
+
+def test_opencode_streaming_writes_live_logs(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENCODE_HEARTBEAT_SECONDS", "0")
+    stage = BaseOpencodeStage()
+    detector = OpencodeErrorDetector()
+
+    result = stage._run_opencode_streaming(
+        [
+            sys.executable,
+            "-c",
+            "import sys; print('out'); print('err', file=sys.stderr)",
+        ],
+        str(tmp_path),
+        {},
+        detector,
+    )
+
+    assert result.returncode == 0
+    assert (tmp_path / "opencode_stdout.jsonl").read_text(encoding="utf-8") == "out\n"
+    assert (tmp_path / "opencode_stderr.log").read_text(encoding="utf-8") == "err\n"
+    status = (tmp_path / "opencode_status.log").read_text(encoding="utf-8")
+    assert "started pid=" in status
+    assert "finished returncode=0" in status
 
 
 def test_opencode_integration_uses_review_prompt_and_agent(monkeypatch, tmp_path):
@@ -169,17 +292,17 @@ def test_opencode_integration_uses_review_prompt_and_agent(monkeypatch, tmp_path
     stage = OpencodeIntegrationStage(agent="gitlab-review")
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text, env):
+    def fake_run(self, args, cwd, env, detector):
         captured["args"] = args
         captured["env"] = env
         return MagicMock(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("src.pipelines.stages.opencode_integration.subprocess.run", fake_run)
+    _patch_opencode_stream(monkeypatch, fake_run)
 
     result = stage.execute(context)
 
     assert not result.should_stop
-    assert captured["args"][7] == "gitlab-review"
+    assert captured["args"][captured["args"].index("--agent") + 1] == "gitlab-review"
     assert captured["args"][-1] == "\n\n".join(
         [
             "Review this GitLab merge request.",
@@ -209,11 +332,11 @@ def test_opencode_integration_strips_mention_for_review_request(monkeypatch, tmp
     stage = OpencodeIntegrationStage(agent="gitlab-review")
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text, env):
+    def fake_run(self, args, cwd, env, detector):
         captured["prompt"] = args[-1]
         return MagicMock(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("src.pipelines.stages.opencode_integration.subprocess.run", fake_run)
+    _patch_opencode_stream(monkeypatch, fake_run)
 
     result = stage.execute(context)
 
@@ -251,11 +374,11 @@ def test_opencode_integration_uses_thread_context_and_state_for_review(monkeypat
     stage = OpencodeIntegrationStage(agent="gitlab-review")
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text, env):
+    def fake_run(self, args, cwd, env, detector):
         captured["prompt"] = args[-1]
         return MagicMock(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("src.pipelines.stages.opencode_integration.subprocess.run", fake_run)
+    _patch_opencode_stream(monkeypatch, fake_run)
 
     result = stage.execute(context)
 

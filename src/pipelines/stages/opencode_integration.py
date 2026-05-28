@@ -1,11 +1,14 @@
 import json
 import logging
 import os
+import re
+import selectors
 import subprocess
+import time
 from pathlib import Path
 from typing import List
 
-from src.opencode_command import opencode_command_args
+from src.opencode_command import DEFAULT_OPENCODE_MODEL, opencode_command_args
 
 from ..base import AgentResult, PipelineContext, Stage, StageResult
 from .preparation_support import (
@@ -17,14 +20,186 @@ from .preparation_support import (
 logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OPENCODE_CONFIG_PATH = REPO_ROOT / "opencode.json"
+DEFAULT_MAX_OPENCODE_ERRORS = 3
+MAX_OPENCODE_ERROR_LINES = 8
+MAX_OPENCODE_ERROR_CHARS = 2000
+DEFAULT_OPENCODE_HEARTBEAT_SECONDS = 60
+LLM_LOG_PATTERN = re.compile(r"\bproviderID=(?P<provider>\S+)\s+modelID=(?P<model>\S+)")
+LOG_FIELD_PATTERNS = {
+    "service": re.compile(r"\bservice=(?P<value>\S+)"),
+    "provider": re.compile(r"\bproviderID=(?P<value>\S+)"),
+    "model": re.compile(r"\bmodelID=(?P<value>\S+)"),
+    "status": re.compile(r'"statusCode"\s*:\s*(?P<value>\d+)'),
+    "request_id": re.compile(r'"request_id"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"'),
+    "retryable": re.compile(r'"isRetryable"\s*:\s*(?P<value>true|false)'),
+}
+ERROR_TYPE_PATTERN = re.compile(r'"type"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"')
+ERROR_NAME_PATTERN = re.compile(r'"name"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"')
+ERROR_MESSAGE_PATTERN = re.compile(r'"message"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"')
+
+
+class OpencodeErrorDetector:
+    """Detect repeated OpenCode provider failures from debug log lines."""
+
+    ERROR_MARKERS = (
+        "AI_APICallError",
+        "AI_RetryError",
+        "APIConnectionError",
+        "APITimeoutError",
+        "AuthenticationError",
+        "rate_limit_error",
+        "usage limit exceeded",
+        "maxRetriesExceeded",
+        "stream error",
+        "statusCode\":401",
+        "statusCode\":403",
+        "statusCode\":429",
+        "401 Unauthorized",
+        "403 Forbidden",
+        "429",
+    )
+
+    def __init__(self, max_errors: int = DEFAULT_MAX_OPENCODE_ERRORS):
+        self.max_errors = max_errors
+        self.error_count = 0
+        self.last_error = ""
+        self.observed_provider = ""
+        self.observed_model = ""
+
+    def observe(self, line: str) -> bool:
+        self._observe_runtime_model(line)
+        if not self._is_error_line(line):
+            return False
+
+        self.error_count += 1
+        self.last_error = summarize_opencode_error_line(line)
+        return self.error_count >= self.max_errors
+
+    def _is_error_line(self, line: str) -> bool:
+        if not line.strip():
+            return False
+        if "ERROR" not in line and "error" not in line:
+            return False
+        return any(marker in line for marker in self.ERROR_MARKERS)
+
+    def _observe_runtime_model(self, line: str) -> None:
+        match = LLM_LOG_PATTERN.search(line)
+        if not match:
+            return
+        self.observed_provider = match.group("provider")
+        self.observed_model = match.group("model")
+
+
+def summarize_opencode_error(stderr: str) -> str:
+    """Return a compact, publishable summary of noisy OpenCode debug stderr."""
+
+    summaries = []
+    for line in stderr.splitlines():
+        if not _is_publishable_error_line(line):
+            continue
+
+        summary = summarize_opencode_error_line(line)
+        if summary and summary not in summaries:
+            summaries.append(summary)
+        if len(summaries) >= MAX_OPENCODE_ERROR_LINES:
+            break
+
+    if not summaries:
+        summaries = [line.strip() for line in stderr.splitlines() if line.strip()][
+            -MAX_OPENCODE_ERROR_LINES:
+        ]
+
+    summary = "\n".join(summaries).strip()
+    if not summary:
+        return "Unknown opencode error"
+    if len(summary) > MAX_OPENCODE_ERROR_CHARS:
+        return summary[:MAX_OPENCODE_ERROR_CHARS].rstrip() + "\n... truncated"
+    return summary
+
+
+def summarize_opencode_error_line(line: str) -> str:
+    searchable = line.replace('\\"', '"')
+    fields = {
+        name: _unescape_log_value(match.group("value"))
+        for name, pattern in LOG_FIELD_PATTERNS.items()
+        if (match := pattern.search(searchable))
+    }
+
+    error_types = [
+        _unescape_log_value(match.group("value"))
+        for match in ERROR_TYPE_PATTERN.finditer(searchable)
+    ]
+    error_names = [
+        _unescape_log_value(match.group("value"))
+        for match in ERROR_NAME_PATTERN.finditer(searchable)
+        if _unescape_log_value(match.group("value")).endswith("Error")
+    ]
+    if error_types or error_names:
+        fields["type"] = _choose_error_type([*error_types, *error_names])
+
+    message_match = ERROR_MESSAGE_PATTERN.search(searchable)
+    if message_match:
+        fields["message"] = _unescape_log_value(message_match.group("value"))
+    elif "usage limit exceeded" in searchable:
+        fields["message"] = "usage limit exceeded"
+    elif "rate_limit_error" in searchable:
+        fields["type"] = fields.get("type", "rate_limit_error")
+
+    if not fields:
+        return _compact_plain_error_line(line)
+
+    parts = []
+    for key in (
+        "service",
+        "provider",
+        "model",
+        "status",
+        "type",
+        "message",
+        "request_id",
+        "retryable",
+    ):
+        value = fields.get(key)
+        if value:
+            parts.append(f"{key}={value}")
+    return "OpenCode provider error: " + " ".join(parts)
+
+
+def _is_publishable_error_line(line: str) -> bool:
+    return OpencodeErrorDetector()._is_error_line(line)
+
+
+def _choose_error_type(error_types: list[str]) -> str:
+    for error_type in reversed(error_types):
+        if error_type not in {"error", "auto"}:
+            return error_type
+    return error_types[-1]
+
+
+def _unescape_log_value(value: str) -> str:
+    try:
+        return json.loads(f'"{value}"')
+    except json.JSONDecodeError:
+        return value
+
+
+def _compact_plain_error_line(line: str) -> str:
+    line = line.strip()
+    if len(line) <= 240:
+        return line
+    return line[:240].rstrip() + " ..."
 
 
 class BaseOpencodeStage(Stage):
     """Shared OpenCode invocation helpers."""
 
     def __init__(self, model: str | None = None, agent: str | None = None):
-        self.model = model or os.getenv("OPENCODE_MODEL", "minimax/MiniMax-M2.7")
-        self.agent = agent or os.getenv("OPENCODE_AGENT", "Build")
+        env_model = os.getenv("OPENCODE_MODEL")
+        env_agent = os.getenv("OPENCODE_AGENT")
+        self.model = model or env_model or DEFAULT_OPENCODE_MODEL
+        self.agent = agent or env_agent or "Build"
+        self.model_source = "pipeline" if model else "env" if env_model else "default"
+        self.agent_source = "pipeline" if agent else "env" if env_agent else "default"
 
     def _require_repo_dir(self, context: PipelineContext) -> str:
         repo_dir = context.local_context_path
@@ -68,23 +243,219 @@ class BaseOpencodeStage(Stage):
         if OPENCODE_CONFIG_PATH.exists():
             env.setdefault("OPENCODE_CONFIG", str(OPENCODE_CONFIG_PATH))
 
-        return subprocess.run(
-            opencode_command_args(
-                "run",
-                "--format",
-                "json",
-                "--model",
-                self.model,
-                "--agent",
-                self.agent,
-                prompt,
-            ),
+        args = opencode_command_args(
+            "run",
+            "--format",
+            "json",
+            "--print-logs",
+            "--log-level",
+            "DEBUG",
+            "--model",
+            self.model,
+            "--agent",
+            self.agent,
+            prompt,
+        )
+        max_errors = int(
+            os.getenv("OPENCODE_MAX_ERROR_EVENTS", DEFAULT_MAX_OPENCODE_ERRORS)
+        )
+        detector = OpencodeErrorDetector(max_errors=max_errors)
+        logger.info(
+            "Starting OpenCode run cwd=%s command=%s model=%s model_source=%s "
+            "agent=%s agent_source=%s config=%s max_error_events=%s prompt_chars=%s",
+            repo_dir,
+            self._format_command_for_log(args),
+            self.model,
+            self.model_source,
+            self.agent,
+            self.agent_source,
+            env.get("OPENCODE_CONFIG", ""),
+            max_errors,
+            len(prompt),
+        )
+        result = self._run_opencode_streaming(args, repo_dir, env, detector)
+        logger.info(
+            "OpenCode run finished returncode=%s requested_model=%s requested_agent=%s "
+            "observed_provider=%s observed_model=%s provider_error_events=%s",
+            result.returncode,
+            self.model,
+            self.agent,
+            detector.observed_provider or "unknown",
+            detector.observed_model or "unknown",
+            detector.error_count,
+        )
+        return result
+
+    def _format_command_for_log(self, args: list[str]) -> list[str]:
+        if not args:
+            return args
+        return [*args[:-1], f"<prompt chars={len(args[-1])}>"]
+
+    def _run_opencode_streaming(
+        self,
+        args: list[str],
+        repo_dir: str,
+        env: dict[str, str],
+        detector: OpencodeErrorDetector,
+    ) -> subprocess.CompletedProcess:
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        stdout_log_path = os.path.join(repo_dir, "opencode_stdout.jsonl")
+        stderr_log_path = os.path.join(repo_dir, "opencode_stderr.log")
+        status_log_path = os.path.join(repo_dir, "opencode_status.log")
+        heartbeat_seconds = int(
+            os.getenv("OPENCODE_HEARTBEAT_SECONDS", DEFAULT_OPENCODE_HEARTBEAT_SECONDS)
+        )
+
+        process = subprocess.Popen(
+            args,
             cwd=repo_dir,
-            check=False,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             env=env,
+            bufsize=1,
         )
+
+        selector = selectors.DefaultSelector()
+        if process.stdout:
+            selector.register(process.stdout, selectors.EVENT_READ, "stdout")
+        if process.stderr:
+            selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+
+        started_at = time.monotonic()
+        last_output_at = started_at
+        last_heartbeat_at = started_at
+        self._write_opencode_status(
+            status_log_path,
+            "started "
+            f"pid={process.pid} stdout_log={stdout_log_path} stderr_log={stderr_log_path}",
+        )
+        logger.info(
+            "OpenCode live logs stdout=%s stderr=%s status=%s pid=%s",
+            stdout_log_path,
+            stderr_log_path,
+            status_log_path,
+            process.pid,
+        )
+
+        try:
+            with open(stdout_log_path, "w", encoding="utf-8") as stdout_log, open(
+                stderr_log_path, "w", encoding="utf-8"
+            ) as stderr_log:
+                while selector.get_map():
+                    selected = selector.select(timeout=0.5)
+                    if not selected:
+                        now = time.monotonic()
+                        if heartbeat_seconds > 0 and now - last_heartbeat_at >= heartbeat_seconds:
+                            self._log_opencode_heartbeat(
+                                status_log_path,
+                                started_at,
+                                last_output_at,
+                                stdout_log_path,
+                                stderr_log_path,
+                            )
+                            last_heartbeat_at = now
+
+                    for key, _ in selected:
+                        line = key.fileobj.readline()
+                        if line == "":
+                            selector.unregister(key.fileobj)
+                            continue
+
+                        last_output_at = time.monotonic()
+                        if key.data == "stdout":
+                            stdout_chunks.append(line)
+                            stdout_log.write(line)
+                            stdout_log.flush()
+                        else:
+                            stderr_chunks.append(line)
+                            stderr_log.write(line)
+                            stderr_log.flush()
+                            if detector.observe(line):
+                                self._terminate_opencode(process)
+                                error_summary = summarize_opencode_error(
+                                    "\n".join(
+                                        [*stderr_chunks, detector.last_error]
+                                    )
+                                )
+                                message = (
+                                    "OpenCode stopped after "
+                                    f"{detector.error_count} provider error log events.\n"
+                                    f"{error_summary}"
+                                )
+                                self._write_opencode_status(status_log_path, message)
+                                return subprocess.CompletedProcess(
+                                    args,
+                                    (
+                                        process.returncode
+                                        if process.returncode is not None
+                                        else -9
+                                    ),
+                                    "".join(stdout_chunks),
+                                    message,
+                                )
+
+                    if process.poll() is not None:
+                        for key in list(selector.get_map().values()):
+                            remainder = key.fileobj.read()
+                            if remainder:
+                                if key.data == "stdout":
+                                    stdout_chunks.append(remainder)
+                                    stdout_log.write(remainder)
+                                    stdout_log.flush()
+                                else:
+                                    stderr_chunks.append(remainder)
+                                    stderr_log.write(remainder)
+                                    stderr_log.flush()
+                            selector.unregister(key.fileobj)
+        finally:
+            selector.close()
+
+        self._write_opencode_status(
+            status_log_path,
+            f"finished returncode={process.returncode} elapsed_s={int(time.monotonic() - started_at)}",
+        )
+        return subprocess.CompletedProcess(
+            args,
+            process.wait(),
+            "".join(stdout_chunks),
+            "".join(stderr_chunks),
+        )
+
+    def _terminate_opencode(self, process: subprocess.Popen) -> None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+    def _log_opencode_heartbeat(
+        self,
+        status_log_path: str,
+        started_at: float,
+        last_output_at: float,
+        stdout_log_path: str,
+        stderr_log_path: str,
+    ) -> None:
+        now = time.monotonic()
+        message = (
+            f"still running elapsed_s={int(now - started_at)} "
+            f"last_output_s={int(now - last_output_at)}"
+        )
+        logger.info(
+            "OpenCode %s stdout=%s stderr=%s",
+            message,
+            stdout_log_path,
+            stderr_log_path,
+        )
+        self._write_opencode_status(status_log_path, message)
+
+    def _write_opencode_status(self, status_log_path: str, message: str) -> None:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(status_log_path, "a", encoding="utf-8") as handle:
+            handle.write(f"{timestamp} {message}\n")
 
     def _extract_text_events(self, lines: List[str]) -> str:
         chunks: List[str] = []
@@ -135,6 +506,9 @@ class OpencodePreparationStage(BaseOpencodeStage):
                 content = "No preparation summary generated."
 
             status = "success" if result.returncode == 0 else "failed"
+            stderr_summary = (
+                summarize_opencode_error(result.stderr) if result.stderr.strip() else ""
+            )
             body = "\n".join(
                 [
                     f"Status: {status}",
@@ -146,13 +520,13 @@ class OpencodePreparationStage(BaseOpencodeStage):
                     content,
                     "",
                     "### Stderr",
-                    fenced_block(result.stderr),
+                    fenced_block(stderr_summary),
                 ]
             )
             append_prep_report_section(context, repo_dir, "OpenCode Preparation", body)
 
             if result.returncode != 0:
-                logger.warning("OpenCode preparation failed: %s", result.stderr.strip())
+                logger.warning("OpenCode preparation failed: %s", stderr_summary)
         except Exception as exc:
             body = "\n".join(
                 [
@@ -205,7 +579,7 @@ class OpencodeIntegrationStage(BaseOpencodeStage):
         result = self._run_opencode(repo_dir, prompt)
 
         if result.returncode != 0:
-            error_msg = result.stderr.strip() or "Unknown opencode error"
+            error_msg = summarize_opencode_error(result.stderr)
             raise RuntimeError(f"opencode run failed: {error_msg}")
 
         events_path = os.path.join(repo_dir, "opencode_events.jsonl")

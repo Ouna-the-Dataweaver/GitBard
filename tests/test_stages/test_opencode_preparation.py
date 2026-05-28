@@ -5,6 +5,13 @@ from src.pipelines.base import PipelineContext
 from src.pipelines.stages.opencode_integration import OpencodePreparationStage
 
 
+def _patch_opencode_stream(monkeypatch, handler):
+    monkeypatch.setattr(
+        "src.pipelines.stages.opencode_integration.BaseOpencodeStage._run_opencode_streaming",
+        handler,
+    )
+
+
 def test_opencode_preparation_writes_events_and_report(monkeypatch, tmp_path):
     issue_context_path = tmp_path / "gitlab_thread_context.md"
     issue_context_path.write_text("# Context\n", encoding="utf-8")
@@ -23,7 +30,7 @@ def test_opencode_preparation_writes_events_and_report(monkeypatch, tmp_path):
     stage = OpencodePreparationStage()
     captured = {}
 
-    def fake_run(args, cwd, check, capture_output, text, env):
+    def fake_run(self, args, cwd, env, detector):
         captured["args"] = args
         captured["cwd"] = cwd
         captured["env"] = env
@@ -33,15 +40,13 @@ def test_opencode_preparation_writes_events_and_report(monkeypatch, tmp_path):
             stderr="",
         )
 
-    monkeypatch.setattr(
-        "src.pipelines.stages.opencode_integration.subprocess.run", fake_run
-    )
+    _patch_opencode_stream(monkeypatch, fake_run)
 
     result = stage.execute(context)
 
     assert not result.should_stop
     assert captured["cwd"] == str(tmp_path)
-    assert captured["args"][7] == "gitlab-prepare"
+    assert captured["args"][captured["args"].index("--agent") + 1] == "gitlab-prepare"
     assert "Prepare this GitLab merge request repository for work." in captured["args"][-1]
     assert "User request: prepare the project" in captured["args"][-1]
     assert "Use the thread context in gitlab_thread_context.md." in captured["args"][-1]
@@ -63,14 +68,14 @@ def test_opencode_preparation_records_failure_without_stopping(monkeypatch, tmp_
     )
     stage = OpencodePreparationStage()
 
-    monkeypatch.setattr(
-        "src.pipelines.stages.opencode_integration.subprocess.run",
-        lambda args, cwd, check, capture_output, text, env: MagicMock(
+    def fake_run(self, args, cwd, env, detector):
+        return MagicMock(
             returncode=1,
             stdout="",
             stderr="toolchain missing",
-        ),
-    )
+        )
+
+    _patch_opencode_stream(monkeypatch, fake_run)
 
     result = stage.execute(context)
 
