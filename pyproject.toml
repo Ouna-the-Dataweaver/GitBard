@@ -6,6 +6,7 @@ dependencies = [
     "uvicorn",
     "requests",
     "python-dotenv",
+    "httpx>=0.28.1",
 ]
 
 [tool.hatch.build.targets.wheel]
