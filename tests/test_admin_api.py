@@ -22,7 +22,7 @@ def test_admin_metadata_endpoint(tmp_path, monkeypatch):
         for option in data["agent_options"]
     )
     assert any(option["name"] == "Build" for option in data["agent_options"])
-    assert any(option["name"] == "zai-coding-plan/glm-5.1" for option in data["model_options"])
+    assert any(option["name"] == "zai-coding-plan/glm-5.2" for option in data["model_options"])
     assert any(
         step["id"] == "OpencodeIntegrationStage"
         and step["provider"] == "opencode"
