@@ -58,11 +58,19 @@ def test_pipeline_publishes_error_to_remaining_note_updater():
 
 def test_pipeline_publishes_progress_notes(monkeypatch):
     posted = []
+    updated = []
 
     def fake_post(project_id, noteable_type, noteable_iid, body, project=None):
         posted.append((project_id, noteable_type, noteable_iid, body))
+        return {"id": 99}
+
+    def fake_update(project_id, noteable_type, noteable_iid, note_id, body, project=None):
+        updated.append((project_id, noteable_type, noteable_iid, note_id, body))
+        return {"id": note_id}
 
     monkeypatch.setattr("src.pipelines.base.post_gitlab_note", fake_post)
+    monkeypatch.setattr("src.pipelines.base.update_gitlab_note", fake_update)
+    monkeypatch.setattr("src.pipelines.base.time.monotonic", lambda: 10.0)
 
     context = PipelineContext(
         webhook_payload={
@@ -94,8 +102,113 @@ def test_pipeline_publishes_progress_notes(monkeypatch):
         123,
         "Issue",
         7,
-        "🤖 OpenCode progress: preparing workspace.",
+        "🤖 **OpenCode progress (1/1)**\n\nPreparing workspace.",
     )
+    assert updated == []
+
+    context.gitlab_note_id = 99
+    context.metadata.pop("progress_note_last_publish_at", None)
+    MockStage.__name__ = "WorkspaceAcquisitionStage"
+    try:
+        pipeline = Pipeline(name="test", stages=[MockStage()])
+        pipeline.execute(context)
+    finally:
+        MockStage.__name__ = "MockStage"
+
+    assert updated[-1] == (
+        123,
+        "Issue",
+        7,
+        99,
+        "🤖 **OpenCode progress (1/1)**\n\nPreparing workspace.",
+    )
+
+
+def test_pipeline_throttles_progress_note_updates(monkeypatch):
+    updated = []
+
+    class SnapshotStage(MockStage):
+        pass
+
+    class WorkspaceStage(MockStage):
+        pass
+
+    SnapshotStage.__name__ = "SnapshotResolverStage"
+    WorkspaceStage.__name__ = "WorkspaceAcquisitionStage"
+
+    def fake_update(project_id, noteable_type, noteable_iid, note_id, body, project=None):
+        updated.append(body)
+        return {"id": note_id}
+
+    monkeypatch.setattr("src.pipelines.base.update_gitlab_note", fake_update)
+    monkeypatch.setattr("src.pipelines.base.time.monotonic", lambda: 10.5)
+
+    context = PipelineContext(
+        webhook_payload={
+            "object_kind": "note",
+            "project": {"id": 123},
+            "object_attributes": {
+                "noteable_type": "Issue",
+                "noteable_iid": 7,
+            },
+        },
+        command="oc_test",
+        gitlab_note_id=99,
+        metadata={
+            "noteable_type": "Issue",
+            "progress_note_last_publish_at": 10.0,
+        },
+    )
+    pipeline = Pipeline(name="test", stages=[SnapshotStage(), WorkspaceStage()])
+
+    result = pipeline.execute(context)
+
+    assert result.success
+    assert updated == []
+
+
+def test_pipeline_progress_note_step_count(monkeypatch):
+    updated = []
+    timestamps = iter([10.0, 11.1])
+
+    class SnapshotStage(MockStage):
+        pass
+
+    class WorkspaceStage(MockStage):
+        pass
+
+    SnapshotStage.__name__ = "SnapshotResolverStage"
+    WorkspaceStage.__name__ = "WorkspaceAcquisitionStage"
+
+    def fake_update(project_id, noteable_type, noteable_iid, note_id, body, project=None):
+        updated.append(body)
+        return {"id": note_id}
+
+    monkeypatch.setattr("src.pipelines.base.update_gitlab_note", fake_update)
+    monkeypatch.setattr("src.pipelines.base.time.monotonic", lambda: next(timestamps))
+
+    context = PipelineContext(
+        webhook_payload={
+            "object_kind": "note",
+            "project": {"id": 123},
+            "object_attributes": {
+                "noteable_type": "Issue",
+                "noteable_iid": 7,
+            },
+        },
+        command="oc_test",
+        gitlab_note_id=99,
+        metadata={"noteable_type": "Issue"},
+    )
+    pipeline = Pipeline(name="test", stages=[SnapshotStage(), WorkspaceStage()])
+
+    result = pipeline.execute(context)
+
+    assert result.success
+    assert updated == [
+        "🤖 **OpenCode progress (1/2)**\n\nResolving target revision.",
+        "🤖 **OpenCode progress (2/2)**\n\nPreparing workspace.",
+    ]
 
 
 def test_pipeline_should_stop():

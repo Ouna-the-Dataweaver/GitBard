@@ -1,6 +1,6 @@
 from ..base import Stage, StageResult, PipelineContext
 import logging
-from src.gitlab_api import extract_noteable_iid, post_gitlab_note
+from src.gitlab_api import extract_noteable_iid, post_gitlab_note, update_gitlab_note
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,8 @@ class NoteUpdaterStage(Stage):
 
         if context.metadata.get("pipeline_error"):
             error_msg = context.metadata.get("pipeline_error", "Unknown error")
-            post_gitlab_note(
+            self._publish_note(
+                context,
                 project_id,
                 noteable_type,
                 noteable_iid,
@@ -29,7 +30,8 @@ class NoteUpdaterStage(Stage):
         result = context.agent_result
         content = result.content if result else "No results generated"
 
-        post_gitlab_note(
+        self._publish_note(
+            context,
             project_id,
             noteable_type,
             noteable_iid,
@@ -40,3 +42,35 @@ class NoteUpdaterStage(Stage):
         logger.info("Updated note with agent results")
 
         return StageResult(context=context, should_stop=False)
+
+    def _publish_note(
+        self,
+        context: PipelineContext,
+        project_id,
+        noteable_type,
+        noteable_iid,
+        body: str,
+        project=None,
+    ):
+        if context.gitlab_note_id:
+            note_response = update_gitlab_note(
+                project_id,
+                noteable_type,
+                noteable_iid,
+                context.gitlab_note_id,
+                body,
+                project=project,
+            )
+            if note_response:
+                return note_response
+
+        note_response = post_gitlab_note(
+            project_id,
+            noteable_type,
+            noteable_iid,
+            body,
+            project=project,
+        )
+        if note_response:
+            context.gitlab_note_id = note_response.get("id")
+        return note_response

@@ -120,3 +120,39 @@ def post_gitlab_note(project_id, noteable_type, noteable_iid, body, project=None
         if resp is not None:
             logger.error("GitLab response: %s", resp.text)
         return None
+
+
+def update_gitlab_note(project_id, noteable_type, noteable_iid, note_id, body, project=None):
+    """Update an existing note (comment) on a GitLab issue or MR."""
+    gitlab_pat = os.getenv("GITLAB_PAT", "")
+    if not gitlab_pat:
+        logger.warning("GITLAB_PAT not configured, cannot update note")
+        return None
+
+    gitlab_url = normalize_gitlab_url(project=project)
+    if noteable_type == "MergeRequest":
+        url = (
+            f"{gitlab_url}/api/v4/projects/{project_id}/merge_requests/"
+            f"{noteable_iid}/notes/{note_id}"
+        )
+    elif noteable_type == "Issue":
+        url = f"{gitlab_url}/api/v4/projects/{project_id}/issues/{noteable_iid}/notes/{note_id}"
+    else:
+        logger.warning("Unsupported noteable_type: %s", noteable_type)
+        return None
+
+    headers = {"PRIVATE-TOKEN": gitlab_pat}
+    data = {"body": body}
+
+    logger.debug("Updating note at %s", url)
+    resp = None
+    try:
+        resp = requests.put(url, headers=headers, json=data, timeout=15)
+        resp.raise_for_status()
+        logger.info("Updated note %s on %s #%s", note_id, noteable_type, noteable_iid)
+        return resp.json()
+    except Exception as exc:
+        logger.error("Failed to update note: %s", exc)
+        if resp is not None:
+            logger.error("GitLab response: %s", resp.text)
+        return None

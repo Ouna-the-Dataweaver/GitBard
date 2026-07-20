@@ -3,11 +3,12 @@ from typing import Optional, Dict, Any, List
 import logging
 import os
 import shutil
+import time
 
 try:
-    from src.gitlab_api import extract_noteable_iid, post_gitlab_note
+    from src.gitlab_api import extract_noteable_iid, post_gitlab_note, update_gitlab_note
 except ModuleNotFoundError:
-    from gitlab_api import extract_noteable_iid, post_gitlab_note
+    from gitlab_api import extract_noteable_iid, post_gitlab_note, update_gitlab_note
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ class Pipeline:
 
         try:
             for index, stage in enumerate(self.stages):
-                self._publish_progress(context, stage)
+                self._publish_progress(context, stage, index)
                 result = stage.execute(context)
                 context = result.context
 
@@ -132,12 +133,32 @@ class Pipeline:
                 )
             return
 
-    def _publish_progress(self, context: PipelineContext, stage: Stage) -> None:
+    def _publish_progress(
+        self, context: PipelineContext, stage: Stage, stage_index: int
+    ) -> None:
         if os.getenv("GITBARD_PROGRESS_NOTES", "1").lower() in {"0", "false", "no"}:
             return
 
         stage_name = stage.__class__.__name__
-        if stage_name in {"HookResolverStage", "NoteUpdaterStage"}:
+        progress_stages = self._progress_stages()
+        if stage_name not in progress_stages:
+            return
+
+        now = time.monotonic()
+        last_publish = context.metadata.get("progress_note_last_publish_at")
+        min_interval_seconds = float(
+            os.getenv("GITBARD_PROGRESS_NOTE_MIN_INTERVAL_SECONDS", "1")
+        )
+        if (
+            context.gitlab_note_id
+            and isinstance(last_publish, (int, float))
+            and now - last_publish < min_interval_seconds
+        ):
+            logger.debug(
+                "Pipeline %s skipped progress note update for %s due to throttle",
+                self.name,
+                stage_name,
+            )
             return
 
         payload = context.webhook_payload
@@ -147,33 +168,67 @@ class Pipeline:
         if not project_id or not noteable_type or not noteable_iid:
             return
 
-        message = self._progress_message(stage_name, stage)
+        progress_index = sum(
+            1
+            for prior_stage in self.stages[: stage_index + 1]
+            if prior_stage.__class__.__name__ in progress_stages
+        )
+        message = self._progress_message(
+            stage_name, stage, progress_index, len(progress_stages)
+        )
         if not message:
             return
 
         try:
-            post_gitlab_note(
-                project_id,
-                noteable_type,
-                noteable_iid,
-                message,
-                project=payload.get("project"),
-            )
+            if context.gitlab_note_id:
+                note_response = update_gitlab_note(
+                    project_id,
+                    noteable_type,
+                    noteable_iid,
+                    context.gitlab_note_id,
+                    message,
+                    project=payload.get("project"),
+                )
+            else:
+                note_response = post_gitlab_note(
+                    project_id,
+                    noteable_type,
+                    noteable_iid,
+                    message,
+                    project=payload.get("project"),
+                )
+                if note_response:
+                    context.gitlab_note_id = note_response.get("id")
+            if note_response:
+                context.metadata["progress_note_last_publish_at"] = now
         except Exception:
-            logger.exception("Pipeline %s failed to publish progress note", self.name)
+            logger.exception("Pipeline %s failed to update progress note", self.name)
 
-    def _progress_message(self, stage_name: str, stage: Stage) -> str:
+    def _progress_stages(self) -> List[str]:
+        return [
+            stage.__class__.__name__
+            for stage in self.stages
+            if stage.__class__.__name__ not in {"HookResolverStage", "NoteUpdaterStage"}
+            and self._progress_message_body(stage.__class__.__name__, stage)
+        ]
+
+    def _progress_message(
+        self, stage_name: str, stage: Stage, step_number: int, step_count: int
+    ) -> str:
+        body = self._progress_message_body(stage_name, stage)
+        if not body:
+            return ""
+        return f"🤖 **OpenCode progress ({step_number}/{step_count})**\n\n{body}"
+
+    def _progress_message_body(self, stage_name: str, stage: Stage) -> str:
         messages = {
-            "SnapshotResolverStage": "🤖 OpenCode progress: resolving target revision.",
-            "WorkspaceAcquisitionStage": "🤖 OpenCode progress: preparing workspace.",
-            "IssueContextFetcherStage": "🤖 OpenCode progress: collecting GitLab context.",
-            "WorkspacePreparationStage": "🤖 OpenCode progress: running preparation.",
+            "SnapshotResolverStage": "Resolving target revision.",
+            "WorkspaceAcquisitionStage": "Preparing workspace.",
+            "IssueContextFetcherStage": "Collecting GitLab context.",
+            "WorkspacePreparationStage": "Running preparation.",
         }
         if stage_name == "OpencodeIntegrationStage":
             model = getattr(stage, "model", "unknown")
             agent = getattr(stage, "agent", "unknown")
-            return (
-                "🤖 OpenCode progress: running model "
-                f"`{model}` with agent `{agent}`."
-            )
+            return f"Running model `{model}` with agent `{agent}`."
         return messages.get(stage_name, "")

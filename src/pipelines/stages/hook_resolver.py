@@ -1,5 +1,6 @@
 from ..base import Stage, StageResult, PipelineContext
 import logging
+import time
 from src.gitlab_api import extract_noteable_iid, post_gitlab_note
 
 logger = logging.getLogger(__name__)
@@ -59,5 +60,6 @@ class HookResolverStage(Stage):
 
         if note_response:
             context.gitlab_note_id = note_response.get("id")
+            context.metadata["progress_note_last_publish_at"] = time.monotonic()
 
         return StageResult(context=context, should_stop=False)
