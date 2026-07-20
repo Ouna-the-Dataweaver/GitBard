@@ -176,6 +176,7 @@ def test_opencode_integration_uses_env_model_and_agent(monkeypatch, tmp_path):
 
 
 def test_opencode_error_detector_stops_after_repeated_provider_errors():
+
     detector = OpencodeErrorDetector(max_errors=2)
 
     assert not detector.observe(
@@ -190,6 +191,40 @@ def test_opencode_error_detector_stops_after_repeated_provider_errors():
     assert detector.observe("ERROR service=llm error={\"name\":\"AI_APICallError\"}")
     assert detector.error_count == 2
     assert "AI_APICallError" in detector.last_error
+
+
+def test_opencode_error_detector_extracts_overloaded_message_from_error_value():
+    detector = OpencodeErrorDetector(max_errors=3)
+
+    overloaded_line = (
+        'timestamp=2026-07-06T09:21:24.614Z level=ERROR run=abc message="stream error" '
+        "providerID=zai-coding-plan modelID=glm-5.2 "
+        'session.id=ses_x small=false agent=deep_review mode=all '
+        'error.error="AI_APICallError: The service may be temporarily overloaded, '
+        'please try again later"'
+    )
+
+    assert not detector.observe(overloaded_line)
+    assert detector.error_count == 1
+    assert "AI_APICallError" in detector.last_error
+    assert "temporarily overloaded" in detector.last_error
+    assert "provider=zai-coding-plan" in detector.last_error
+    assert "model=glm-5.2" in detector.last_error
+
+
+def test_opencode_error_summary_extracts_retry_error_from_error_value():
+    retry_line = (
+        'timestamp=2026-07-06T09:21:57.061Z level=ERROR run=abc message="stream error" '
+        "providerID=zai-coding-plan modelID=glm-5.2 "
+        'error.error="AI_RetryError: Failed after 5 attempts. Last error: '
+        'The service may be temporarily overloaded, please try again later"'
+    )
+
+    summary = summarize_opencode_error(retry_line)
+
+    assert "type=AI_RetryError" in summary
+    assert "Failed after 5 attempts" in summary
+    assert "provider=zai-coding-plan" in summary
 
 
 def test_opencode_error_summary_excludes_verbose_request_payload():

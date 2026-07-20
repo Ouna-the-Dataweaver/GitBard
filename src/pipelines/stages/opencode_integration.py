@@ -20,7 +20,7 @@ from .preparation_support import (
 logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OPENCODE_CONFIG_PATH = REPO_ROOT / "opencode.json"
-DEFAULT_MAX_OPENCODE_ERRORS = 3
+DEFAULT_MAX_OPENCODE_ERRORS = 12
 MAX_OPENCODE_ERROR_LINES = 8
 MAX_OPENCODE_ERROR_CHARS = 2000
 DEFAULT_OPENCODE_HEARTBEAT_SECONDS = 60
@@ -36,6 +36,7 @@ LOG_FIELD_PATTERNS = {
 ERROR_TYPE_PATTERN = re.compile(r'"type"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"')
 ERROR_NAME_PATTERN = re.compile(r'"name"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"')
 ERROR_MESSAGE_PATTERN = re.compile(r'"message"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"')
+ERROR_VALUE_PATTERN = re.compile(r'\berror\.error="(?P<value>(?:\\.|[^"\\])*)"')
 
 
 class OpencodeErrorDetector:
@@ -73,6 +74,12 @@ class OpencodeErrorDetector:
 
         self.error_count += 1
         self.last_error = summarize_opencode_error_line(line)
+        logger.warning(
+            "OpenCode provider error event %s/%s: %s",
+            self.error_count,
+            self.max_errors,
+            self.last_error,
+        )
         return self.error_count >= self.max_errors
 
     def _is_error_line(self, line: str) -> bool:
@@ -145,6 +152,16 @@ def summarize_opencode_error_line(line: str) -> str:
     elif "rate_limit_error" in searchable:
         fields["type"] = fields.get("type", "rate_limit_error")
 
+    error_value_match = ERROR_VALUE_PATTERN.search(searchable)
+    if error_value_match:
+        error_type, error_message = _split_error_value(
+            _unescape_log_value(error_value_match.group("value"))
+        )
+        if error_type:
+            fields.setdefault("type", error_type)
+        if error_message:
+            fields.setdefault("message", error_message)
+
     if not fields:
         return _compact_plain_error_line(line)
 
@@ -181,6 +198,22 @@ def _unescape_log_value(value: str) -> str:
         return json.loads(f'"{value}"')
     except json.JSONDecodeError:
         return value
+
+
+def _split_error_value(value: str) -> tuple[str, str]:
+    """Split an `error.error="Type: message"` log value into type and message.
+
+    OpenCode emits provider failures as `error.error="AI_APICallError: ..."` or
+    `error.error="AI_RetryError: ..."`. The prefix before the first ": " is the
+    error type when it is a single whitespace-free token; the remainder is the
+    human-readable message.
+    """
+    if ": " not in value:
+        return "", value
+    prefix, _, rest = value.partition(": ")
+    if prefix.strip() and not any(ch.isspace() for ch in prefix):
+        return prefix, rest
+    return "", value
 
 
 def _compact_plain_error_line(line: str) -> str:
@@ -276,13 +309,15 @@ class BaseOpencodeStage(Stage):
         result = self._run_opencode_streaming(args, repo_dir, env, detector)
         logger.info(
             "OpenCode run finished returncode=%s requested_model=%s requested_agent=%s "
-            "observed_provider=%s observed_model=%s provider_error_events=%s",
+            "observed_provider=%s observed_model=%s provider_error_events=%s "
+            "last_error=%s",
             result.returncode,
             self.model,
             self.agent,
             detector.observed_provider or "unknown",
             detector.observed_model or "unknown",
             detector.error_count,
+            detector.last_error or "none",
         )
         return result
 
