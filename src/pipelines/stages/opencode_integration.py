@@ -458,12 +458,19 @@ class BaseOpencodeStage(Stage):
         prompt: str,
         progress_callback: Callable[[str], None] | None = None,
     ) -> subprocess.CompletedProcess:
+        repo_dir = os.path.abspath(repo_dir)
         env = os.environ.copy()
+        # OpenCode prefers PWD over the process cwd when resolving its workspace.
+        # subprocess does not update an inherited PWD when cwd= is supplied, so
+        # keep both values aligned and pass --dir as a second explicit guard.
+        env["PWD"] = repo_dir
         if OPENCODE_CONFIG_PATH.exists():
             env.setdefault("OPENCODE_CONFIG", str(OPENCODE_CONFIG_PATH))
 
         args = opencode_command_args(
             "run",
+            "--dir",
+            repo_dir,
             "--format",
             "json",
             "--print-logs",

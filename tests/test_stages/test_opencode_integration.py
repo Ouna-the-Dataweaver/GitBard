@@ -23,6 +23,7 @@ def _patch_opencode_stream(monkeypatch, handler):
 
 
 def test_opencode_integration_uses_question_and_issue_context(monkeypatch, tmp_path):
+    monkeypatch.setenv("PWD", "/home/theio/repos/GitBard")
     issue_context_path = tmp_path / "gitlab_issue_content.md"
     issue_context_path.write_text("# Issue context\n", encoding="utf-8")
 
@@ -66,6 +67,8 @@ def test_opencode_integration_uses_question_and_issue_context(monkeypatch, tmp_p
         ]
     )
     assert captured["env"]["OPENCODE_CONFIG"].endswith("/GitBard/opencode.json")
+    assert captured["env"]["PWD"] == str(tmp_path)
+    assert captured["args"][captured["args"].index("--dir") + 1] == str(tmp_path)
     assert context.agent_result is not None
     assert context.agent_result.content == "Answer ready"
     assert (tmp_path / "opencode_events.jsonl").exists()
