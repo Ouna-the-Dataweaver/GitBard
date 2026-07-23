@@ -12,8 +12,6 @@ Supported triggers:
 - `@nid-bugbard` on non-MR notes - replies with a lightweight delivery check.
 - `/oc_review` - runs the `gitlab-review` agent from `opencode.json`.
 - `/oc_ask` - runs OpenCode and posts the answer back to the thread.
-- `/oc_test` - runs OpenCode for ad hoc testing.
-- `/oc_deeptest` - runs repository preparation before the main OpenCode pass.
 - `/oc_deepreview` - runs repository preparation, then the `deep_review` agent.
 
 ## Layout

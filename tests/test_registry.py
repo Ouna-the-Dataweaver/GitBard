@@ -8,18 +8,16 @@ def test_detect_command_returns_matching_command():
     assert command.name == "oc_review"
 
 
-def test_detect_command_returns_deeptest_command():
-    command = detect_command("please run /oc_deeptest on this change")
-
-    assert command is not None
-    assert command.name == "oc_deeptest"
-
-
 def test_detect_command_returns_deepreview_command():
     command = detect_command("please run /oc_deepreview on this change")
 
     assert command is not None
     assert command.name == "oc_deepreview"
+
+
+def test_detect_command_ignores_removed_commands():
+    assert detect_command("please run /oc_test") is None
+    assert detect_command("please run /oc_deeptest") is None
 
 
 def test_contains_user_mention_matches_exact_username():

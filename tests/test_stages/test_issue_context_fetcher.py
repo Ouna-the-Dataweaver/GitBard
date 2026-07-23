@@ -104,7 +104,7 @@ def test_issue_context_fetcher_writes_merge_request_context(monkeypatch, tmp_pat
                 {
                     "author": {"name": "Alice"},
                     "created_at": "2026-03-31T10:00:00Z",
-                    "body": "/oc_test Summarize this MR and do a small review, please?",
+                    "body": "/oc_ask Summarize this MR and do a small review, please?",
                 }
             ]
         ),

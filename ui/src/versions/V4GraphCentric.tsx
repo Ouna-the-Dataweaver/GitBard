@@ -285,28 +285,6 @@ function IconRefresh({ size = 20, color = "currentColor" }: IconProps) {
   );
 }
 
-function IconFlask({ size = 20, color = "currentColor" }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10 2v7.31" />
-      <path d="M14 2v7.31" />
-      <path d="M8.5 2h7" />
-      <path d="M14 9.3a6.5 6.5 0 1 1-4 0" />
-      <path d="M5.52 16h12.96" />
-    </svg>
-  );
-}
-
-function IconLayers({ size = 20, color = "currentColor" }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="12 2 2 7 12 12 22 7 12 2" />
-      <polyline points="2 17 12 22 22 17" />
-      <polyline points="2 12 12 17 22 12" />
-    </svg>
-  );
-}
-
 function IconAlertTriangle({ size = 20, color = "currentColor" }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -336,8 +314,6 @@ const SECTION_META: Record<
 const PRESET_ICON: Record<string, React.FC<IconProps>> = {
   ask: IconPipeline,
   review: IconChat,
-  test: IconFlask,
-  deep_test: IconLayers,
   deep_review: IconChat,
 };
 

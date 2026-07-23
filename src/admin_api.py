@@ -28,8 +28,6 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 SUPPORTED_TRIGGER_TYPES = [
     "slash_command",
     "mention",
-    "issue_event",
-    "merge_request_event",
 ]
 SUPPORTED_SCOPES = ["issue", "merge_request", "both"]
 SUPPORTED_PRESETS = list(supported_presets())

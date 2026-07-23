@@ -81,7 +81,7 @@ def test_pipeline_publishes_progress_notes(monkeypatch):
                 "noteable_iid": 7,
             },
         },
-        command="oc_test",
+        command="oc_ask",
         metadata={"noteable_type": "Issue"},
     )
     pipeline = Pipeline(name="test", stages=[MockStage()])
@@ -152,7 +152,7 @@ def test_pipeline_throttles_progress_note_updates(monkeypatch):
                 "noteable_iid": 7,
             },
         },
-        command="oc_test",
+        command="oc_ask",
         gitlab_note_id=99,
         metadata={
             "noteable_type": "Issue",
@@ -196,7 +196,7 @@ def test_pipeline_progress_note_step_count(monkeypatch):
                 "noteable_iid": 7,
             },
         },
-        command="oc_test",
+        command="oc_ask",
         gitlab_note_id=99,
         metadata={"noteable_type": "Issue"},
     )

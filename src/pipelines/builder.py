@@ -283,16 +283,6 @@ COMMON_OPENCODE_STAGE_IDS = (
 PIPELINE_PRESET_STAGE_IDS: dict[str, tuple[str, ...]] = {
     "review": COMMON_OPENCODE_STAGE_IDS,
     "ask": COMMON_OPENCODE_STAGE_IDS,
-    "test": COMMON_OPENCODE_STAGE_IDS,
-    "deep_test": (
-        "HookResolverStage",
-        "SnapshotResolverStage",
-        "WorkspaceAcquisitionStage",
-        "IssueContextFetcherStage",
-        "WorkspacePreparationStage",
-        "OpencodeIntegrationStage",
-        "NoteUpdaterStage",
-    ),
     "deep_review": (
         "HookResolverStage",
         "SnapshotResolverStage",
@@ -305,7 +295,6 @@ PIPELINE_PRESET_STAGE_IDS: dict[str, tuple[str, ...]] = {
 }
 
 PRESET_ALIASES = {
-    "deeptest": "deep_test",
     "deepreview": "deep_review",
 }
 

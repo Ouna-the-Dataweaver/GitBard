@@ -255,11 +255,11 @@ def test_admin_preview_fallback_to_preset_stages():
         json={
             "id": "preset-fallback",
             "name": "Preset Fallback",
-            "preset": "deep_test",
+            "preset": "deep_review",
             "trigger": {
                 "type": "slash_command",
                 "scope": "merge_request",
-                "commandText": "/deep_test",
+                "commandText": "/deep_review",
             },
         },
     )

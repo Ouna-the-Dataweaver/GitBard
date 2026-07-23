@@ -1,12 +1,8 @@
-export type TriggerType =
-  | "slash_command"
-  | "mention"
-  | "issue_event"
-  | "merge_request_event";
+export type TriggerType = "slash_command" | "mention";
 
 export type Scope = "issue" | "merge_request" | "both";
 
-export type PipelinePreset = "review" | "ask" | "test" | "deep_test" | "deep_review";
+export type PipelinePreset = "review" | "ask" | "deep_review";
 
 export interface PipelineSummary {
   id: string;

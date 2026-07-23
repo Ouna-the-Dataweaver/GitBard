@@ -62,7 +62,7 @@ sample_note_payload = {
     },
     "object_attributes": {
         "id": 789,
-        "note": "/oc_test",
+        "note": "/oc_ask",
         "noteable_type": "MergeRequest",
         "noteable_iid": 42,
     },

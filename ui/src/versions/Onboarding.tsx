@@ -182,8 +182,6 @@ export default function Onboarding() {
               <div className="v4-onboarding-commands">
                 <span>/oc_review</span>
                 <span>/oc_ask</span>
-                <span>/oc_test</span>
-                <span>/oc_deeptest</span>
                 <span>/oc_deepreview</span>
                 <span>@nid-bugbard</span>
               </div>
@@ -191,7 +189,7 @@ export default function Onboarding() {
 
             <GuideCard kicker="05" title="Optional repo preparation hook">
               <p className="v4-onboarding-copy">
-                If the selected pipeline enables repo preparation, GitBard runs a repo-root `.gitbard.sh` before the OpenCode preparation pass. Add this only when the project needs setup commands before review or test commands.
+                If the selected pipeline enables repo preparation, GitBard runs a repo-root `.gitbard.sh` before the OpenCode preparation pass. Add this only when the project needs setup commands before review.
               </p>
               <CodeBlock>{`#!/usr/bin/env bash
 set -euo pipefail
