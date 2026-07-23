@@ -6,9 +6,12 @@ from src.pipelines.stages.opencode_integration import OpencodePreparationStage
 
 
 def _patch_opencode_stream(monkeypatch, handler):
+    def wrapped(self, args, cwd, env, detector, progress_callback=None):
+        return handler(self, args, cwd, env, detector)
+
     monkeypatch.setattr(
         "src.pipelines.stages.opencode_integration.BaseOpencodeStage._run_opencode_streaming",
-        handler,
+        wrapped,
     )
 
 
@@ -47,7 +50,9 @@ def test_opencode_preparation_writes_events_and_report(monkeypatch, tmp_path):
     assert not result.should_stop
     assert captured["cwd"] == str(tmp_path)
     assert captured["args"][captured["args"].index("--agent") + 1] == "gitlab-prepare"
-    assert "Prepare this GitLab merge request repository for work." in captured["args"][-1]
+    assert (
+        "Prepare this GitLab merge request repository for work." in captured["args"][-1]
+    )
     assert "User request: prepare the project" in captured["args"][-1]
     assert "Use the thread context in gitlab_thread_context.md." in captured["args"][-1]
     assert "Current review scope is feature -> main." in captured["args"][-1]

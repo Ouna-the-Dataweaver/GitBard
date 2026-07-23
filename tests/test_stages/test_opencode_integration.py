@@ -6,14 +6,19 @@ from src.pipelines.stages.opencode_integration import (
     BaseOpencodeStage,
     OpencodeErrorDetector,
     OpencodeIntegrationStage,
+    format_agent_steps_details,
+    parse_opencode_output,
     summarize_opencode_error,
 )
 
 
 def _patch_opencode_stream(monkeypatch, handler):
+    def wrapped(self, args, cwd, env, detector, progress_callback=None):
+        return handler(self, args, cwd, env, detector)
+
     monkeypatch.setattr(
         "src.pipelines.stages.opencode_integration.BaseOpencodeStage._run_opencode_streaming",
-        handler,
+        wrapped,
     )
 
 
@@ -64,7 +69,79 @@ def test_opencode_integration_uses_question_and_issue_context(monkeypatch, tmp_p
     assert context.agent_result is not None
     assert context.agent_result.content == "Answer ready"
     assert (tmp_path / "opencode_events.jsonl").exists()
-    assert (tmp_path / "opencode_reply.md").read_text(encoding="utf-8") == "Answer ready\n"
+    assert (tmp_path / "opencode_reply.md").read_text(
+        encoding="utf-8"
+    ) == "Answer ready\n"
+
+
+def test_parse_opencode_output_supports_text_variants_and_agent_steps():
+    output = "\n".join(
+        [
+            '{"type":"step_start","part":{"type":"step-start"}}',
+            '{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","title":"Run tests"}}}',
+            '{"type":"message.part.updated","properties":{"part":{"id":"one","type":"text","text":"Draft"}}}',
+            '{"type":"text","part":{"id":"one","text":"Answer"}}',
+            '{"type":"message.part.updated","properties":{"part":{"id":"two","type":"text","text":" ready"}}}',
+            '{"type":"step_finish","part":{"type":"step-finish","reason":"stop","tokens":{"output":42}}}',
+        ]
+    )
+
+    parsed = parse_opencode_output(output)
+
+    assert parsed.text == "Answer ready"
+    assert parsed.steps == [
+        "⏳ Agent turn 1 started",
+        "✅ `bash` — Run tests",
+        "✅ Agent turn 1 finished — stop, 42 output tokens",
+    ]
+    assert "<summary>Agent steps (3)</summary>" in format_agent_steps_details(
+        parsed.steps
+    )
+
+
+def test_parse_opencode_output_falls_back_to_plain_stdout():
+    parsed = parse_opencode_output("plain final response\n")
+
+    assert parsed.text == "plain final response"
+    assert parsed.invalid_line_count == 1
+
+
+def test_opencode_agent_progress_updates_existing_note(monkeypatch, tmp_path):
+    updated = []
+
+    def fake_update(
+        project_id, noteable_type, noteable_iid, note_id, body, project=None
+    ):
+        updated.append(body)
+        return {"id": note_id}
+
+    monkeypatch.setattr(
+        "src.pipelines.stages.opencode_integration.update_gitlab_note", fake_update
+    )
+    context = PipelineContext(
+        webhook_payload={
+            "project": {"id": 1},
+            "object_attributes": {
+                "noteable_type": "MergeRequest",
+                "noteable_iid": 2,
+            },
+        },
+        local_context_path=str(tmp_path),
+        gitlab_note_id=9,
+        metadata={"noteable_type": "MergeRequest"},
+    )
+    output = (
+        '{"type":"tool_use","part":{"type":"tool","tool":"read",'
+        '"state":{"status":"completed","title":"src/app.py"}}}\n'
+    )
+
+    OpencodeIntegrationStage()._publish_agent_progress(context, output)
+
+    assert len(updated) == 1
+    assert "🤖 **OpenCode is still working**" in updated[0]
+    assert "<summary>Agent steps (1)</summary>" in updated[0]
+    assert "✅ `read` — src/app.py" in updated[0]
+    assert context.metadata["agent_steps"] == ["✅ `read` — src/app.py"]
 
 
 def test_opencode_integration_includes_prep_report_when_present(monkeypatch, tmp_path):
@@ -169,8 +246,7 @@ def test_opencode_integration_uses_env_model_and_agent(monkeypatch, tmp_path):
     assert "--print-logs" in captured["args"]
     assert captured["args"][captured["args"].index("--log-level") + 1] == "DEBUG"
     assert (
-        captured["args"][captured["args"].index("--model") + 1]
-        == "openai/gpt-4.1-mini"
+        captured["args"][captured["args"].index("--model") + 1] == "openai/gpt-4.1-mini"
     )
     assert captured["args"][captured["args"].index("--agent") + 1] == "Reviewer"
 
@@ -188,7 +264,7 @@ def test_opencode_error_detector_stops_after_repeated_provider_errors():
     assert not detector.observe(
         'ERROR service=llm error={"statusCode":429,"responseBody":"rate_limit_error"}'
     )
-    assert detector.observe("ERROR service=llm error={\"name\":\"AI_APICallError\"}")
+    assert detector.observe('ERROR service=llm error={"name":"AI_APICallError"}')
     assert detector.error_count == 2
     assert "AI_APICallError" in detector.last_error
 
@@ -199,7 +275,7 @@ def test_opencode_error_detector_extracts_overloaded_message_from_error_value():
     overloaded_line = (
         'timestamp=2026-07-06T09:21:24.614Z level=ERROR run=abc message="stream error" '
         "providerID=zai-coding-plan modelID=glm-5.2 "
-        'session.id=ses_x small=false agent=deep_review mode=all '
+        "session.id=ses_x small=false agent=deep_review mode=all "
         'error.error="AI_APICallError: The service may be temporarily overloaded, '
         'please try again later"'
     )
@@ -229,7 +305,7 @@ def test_opencode_error_summary_extracts_retry_error_from_error_value():
 
 def test_opencode_error_summary_excludes_verbose_request_payload():
     noisy_error = (
-        'ERROR service=llm providerID=minimax modelID=MiniMax-M2.7 '
+        "ERROR service=llm providerID=minimax modelID=MiniMax-M2.7 "
         'error={"requestBody":{"system":"full system prompt",'
         '"tools":[{"name":"zai-vision_extract_text_from_screenshot",'
         '"input_schema":{"properties":{"prompt":{"description":"huge schema"}}}}],'
@@ -313,6 +389,35 @@ def test_opencode_streaming_writes_live_logs(monkeypatch, tmp_path):
     assert "finished returncode=0" in status
 
 
+def test_opencode_streaming_publishes_periodic_agent_progress(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENCODE_HEARTBEAT_SECONDS", "0")
+    monkeypatch.setenv("GITBARD_AGENT_PROGRESS_INTERVAL_SECONDS", "1")
+    stage = BaseOpencodeStage()
+    progress_outputs = []
+
+    result = stage._run_opencode_streaming(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import time; "
+                'print(\'{"type":"tool_use","part":{"type":"tool",'
+                '"tool":"read","state":{"status":"completed",'
+                '"title":"app.py"}}}\', flush=True); '
+                "time.sleep(1.2)"
+            ),
+        ],
+        str(tmp_path),
+        {},
+        OpencodeErrorDetector(),
+        progress_callback=progress_outputs.append,
+    )
+
+    assert result.returncode == 0
+    assert progress_outputs
+    assert parse_opencode_output(progress_outputs[-1]).steps == ["✅ `read` — app.py"]
+
+
 def test_opencode_integration_uses_review_prompt_and_agent(monkeypatch, tmp_path):
     context = PipelineContext(
         webhook_payload={},
@@ -390,7 +495,9 @@ def test_opencode_integration_strips_mention_for_review_request(monkeypatch, tmp
     )
 
 
-def test_opencode_integration_uses_thread_context_and_state_for_review(monkeypatch, tmp_path):
+def test_opencode_integration_uses_thread_context_and_state_for_review(
+    monkeypatch, tmp_path
+):
     thread_context_path = tmp_path / "gitlab_thread_context.md"
     thread_context_path.write_text("# MR context\n", encoding="utf-8")
 
@@ -398,7 +505,11 @@ def test_opencode_integration_uses_thread_context_and_state_for_review(monkeypat
         webhook_payload={},
         command="oc_review",
         local_context_path=str(tmp_path),
-        code_snapshot={"source_branch": "feature", "target_branch": "main", "merge_request_state": "merged"},
+        code_snapshot={
+            "source_branch": "feature",
+            "target_branch": "main",
+            "merge_request_state": "merged",
+        },
         metadata={
             "note_body": "/oc_review",
             "trigger_pattern": "/oc_review",
@@ -434,7 +545,9 @@ def test_opencode_integration_uses_thread_context_and_state_for_review(monkeypat
     )
 
 
-def test_opencode_integration_rejects_historical_review_without_thread_context(tmp_path):
+def test_opencode_integration_rejects_historical_review_without_thread_context(
+    tmp_path,
+):
     context = PipelineContext(
         webhook_payload={},
         command="oc_review",
@@ -451,7 +564,6 @@ def test_opencode_integration_rejects_historical_review_without_thread_context(t
     result = stage.execute(context)
 
     assert result.should_stop
-    assert (
-        "Cannot review this merge request reliably because it is not open"
-        in str(result.error)
+    assert "Cannot review this merge request reliably because it is not open" in str(
+        result.error
     )

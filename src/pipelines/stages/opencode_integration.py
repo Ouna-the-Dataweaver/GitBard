@@ -1,14 +1,21 @@
 import json
+import html
 import logging
 import os
 import re
 import selectors
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Callable, List
 
 from src.opencode_command import DEFAULT_OPENCODE_MODEL, opencode_command_args
+from src.gitlab_api import (
+    extract_noteable_iid,
+    post_gitlab_note,
+    update_gitlab_note,
+)
 
 from ..base import AgentResult, PipelineContext, Stage, StageResult
 from .preparation_support import (
@@ -24,6 +31,9 @@ DEFAULT_MAX_OPENCODE_ERRORS = 12
 MAX_OPENCODE_ERROR_LINES = 8
 MAX_OPENCODE_ERROR_CHARS = 2000
 DEFAULT_OPENCODE_HEARTBEAT_SECONDS = 60
+DEFAULT_AGENT_PROGRESS_SECONDS = 60
+MAX_AGENT_STEPS = 50
+MAX_AGENT_STEP_CHARS = 300
 LLM_LOG_PATTERN = re.compile(r"\bproviderID=(?P<provider>\S+)\s+modelID=(?P<model>\S+)")
 LOG_FIELD_PATTERNS = {
     "service": re.compile(r"\bservice=(?P<value>\S+)"),
@@ -39,6 +49,177 @@ ERROR_MESSAGE_PATTERN = re.compile(r'"message"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)
 ERROR_VALUE_PATTERN = re.compile(r'\berror\.error="(?P<value>(?:\\.|[^"\\])*)"')
 
 
+@dataclass(frozen=True)
+class ParsedOpencodeOutput:
+    text: str
+    steps: list[str]
+    event_count: int = 0
+    invalid_line_count: int = 0
+
+
+def parse_opencode_output(output: str) -> ParsedOpencodeOutput:
+    """Extract the final response and compact agent activity from OpenCode output."""
+
+    text_parts: dict[str, tuple[int, str]] = {}
+    anonymous_text_parts: list[tuple[int, str]] = []
+    plain_text_lines: list[str] = []
+    steps: list[str] = []
+    event_count = 0
+    invalid_line_count = 0
+    turn_number = 0
+
+    for line_number, raw_line in enumerate(output.splitlines()):
+        trimmed = raw_line.strip()
+        if not trimmed:
+            continue
+
+        try:
+            event = json.loads(trimmed)
+        except json.JSONDecodeError:
+            invalid_line_count += 1
+            plain_text_lines.append(trimmed)
+            continue
+
+        if not isinstance(event, dict):
+            continue
+
+        event_count += 1
+        event_type = str(event.get("type") or "")
+        part = _opencode_event_part(event)
+        part_type = str(part.get("type") or "") if part else ""
+
+        text = _opencode_event_text(event, part)
+        if text and (
+            event_type in {"text", "assistant", "message", "result"}
+            or part_type == "text"
+        ):
+            part_id = str(part.get("id") or "") if part else ""
+            if part_id:
+                first_seen = text_parts.get(part_id, (line_number, ""))[0]
+                text_parts[part_id] = (first_seen, text)
+            else:
+                anonymous_text_parts.append((line_number, text))
+
+        if event_type == "step_start" or part_type == "step-start":
+            turn_number += 1
+            steps.append(f"⏳ Agent turn {turn_number} started")
+            continue
+
+        if event_type == "step_finish" or part_type == "step-finish":
+            if turn_number == 0:
+                turn_number = 1
+            steps.append(_format_turn_finished(part, turn_number))
+            continue
+
+        if event_type == "tool_use" or part_type == "tool":
+            step = _format_tool_step(part)
+            if step:
+                steps.append(step)
+
+    ordered_text = sorted(
+        [*text_parts.values(), *anonymous_text_parts], key=lambda item: item[0]
+    )
+    text = "".join(value for _, value in ordered_text).strip()
+    if not text:
+        text = "\n".join(plain_text_lines).strip()
+
+    return ParsedOpencodeOutput(
+        text=text,
+        steps=steps[-MAX_AGENT_STEPS:],
+        event_count=event_count,
+        invalid_line_count=invalid_line_count,
+    )
+
+
+def format_agent_steps_details(steps: list[str]) -> str:
+    if not steps:
+        return ""
+    body = "\n".join(f"- {step}" for step in steps[-MAX_AGENT_STEPS:])
+    return (
+        "<details>\n"
+        f"<summary>Agent steps ({min(len(steps), MAX_AGENT_STEPS)})</summary>\n\n"
+        f"{body}\n"
+        "</details>"
+    )
+
+
+def _opencode_event_part(event: dict) -> dict:
+    part = event.get("part")
+    if isinstance(part, dict):
+        return part
+    properties = event.get("properties")
+    if isinstance(properties, dict) and isinstance(properties.get("part"), dict):
+        return properties["part"]
+    return {}
+
+
+def _opencode_event_text(event: dict, part: dict) -> str:
+    for candidate in (
+        part.get("text"),
+        part.get("content"),
+        event.get("text"),
+        event.get("content"),
+        event.get("output"),
+        event.get("result"),
+    ):
+        if isinstance(candidate, str) and candidate:
+            return candidate
+    return ""
+
+
+def _format_tool_step(part: dict) -> str:
+    tool = _compact_agent_step_value(part.get("tool") or "tool", limit=80)
+    state = part.get("state") if isinstance(part.get("state"), dict) else {}
+    status = str(state.get("status") or "completed")
+    if status not in {"completed", "error"}:
+        return ""
+
+    title = state.get("title")
+    if not title and status == "error":
+        title = state.get("error")
+    if not title:
+        tool_input = state.get("input") if isinstance(state.get("input"), dict) else {}
+        title = next(
+            (
+                tool_input.get(key)
+                for key in (
+                    "description",
+                    "command",
+                    "path",
+                    "filePath",
+                    "pattern",
+                    "query",
+                )
+                if tool_input.get(key)
+            ),
+            "",
+        )
+    title_text = _compact_agent_step_value(title, limit=MAX_AGENT_STEP_CHARS)
+    icon = "✅" if status == "completed" else "❌"
+    suffix = f" — {title_text}" if title_text and title_text != tool else ""
+    safe_tool = tool.replace("`", "'")
+    return f"{icon} `{safe_tool}`{suffix}"
+
+
+def _format_turn_finished(part: dict, turn_number: int) -> str:
+    reason = _compact_agent_step_value(part.get("reason") or "finished", limit=80)
+    tokens = part.get("tokens") if isinstance(part.get("tokens"), dict) else {}
+    output_tokens = tokens.get("output")
+    token_text = (
+        f", {output_tokens} output tokens" if isinstance(output_tokens, int) else ""
+    )
+    return f"✅ Agent turn {turn_number} finished — {reason}{token_text}"
+
+
+def _compact_agent_step_value(value, *, limit: int) -> str:
+    if isinstance(value, (dict, list)):
+        value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    compact = " ".join(str(value or "").split())
+    if len(compact) > limit:
+        compact = compact[: limit - 3].rstrip() + "..."
+    return html.escape(compact)
+
+
 class OpencodeErrorDetector:
     """Detect repeated OpenCode provider failures from debug log lines."""
 
@@ -52,9 +233,9 @@ class OpencodeErrorDetector:
         "usage limit exceeded",
         "maxRetriesExceeded",
         "stream error",
-        "statusCode\":401",
-        "statusCode\":403",
-        "statusCode\":429",
+        'statusCode":401',
+        'statusCode":403',
+        'statusCode":429',
         "401 Unauthorized",
         "403 Forbidden",
         "429",
@@ -271,7 +452,12 @@ class BaseOpencodeStage(Stage):
         if merge_request_state:
             prompt.append(f"Merge request state: {merge_request_state}.")
 
-    def _run_opencode(self, repo_dir: str, prompt: str) -> subprocess.CompletedProcess:
+    def _run_opencode(
+        self,
+        repo_dir: str,
+        prompt: str,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         if OPENCODE_CONFIG_PATH.exists():
             env.setdefault("OPENCODE_CONFIG", str(OPENCODE_CONFIG_PATH))
@@ -306,7 +492,13 @@ class BaseOpencodeStage(Stage):
             max_errors,
             len(prompt),
         )
-        result = self._run_opencode_streaming(args, repo_dir, env, detector)
+        result = self._run_opencode_streaming(
+            args,
+            repo_dir,
+            env,
+            detector,
+            progress_callback=progress_callback,
+        )
         logger.info(
             "OpenCode run finished returncode=%s requested_model=%s requested_agent=%s "
             "observed_provider=%s observed_model=%s provider_error_events=%s "
@@ -332,6 +524,7 @@ class BaseOpencodeStage(Stage):
         repo_dir: str,
         env: dict[str, str],
         detector: OpencodeErrorDetector,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> subprocess.CompletedProcess:
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
@@ -340,6 +533,12 @@ class BaseOpencodeStage(Stage):
         status_log_path = os.path.join(repo_dir, "opencode_status.log")
         heartbeat_seconds = int(
             os.getenv("OPENCODE_HEARTBEAT_SECONDS", DEFAULT_OPENCODE_HEARTBEAT_SECONDS)
+        )
+        progress_seconds = int(
+            os.getenv(
+                "GITBARD_AGENT_PROGRESS_INTERVAL_SECONDS",
+                DEFAULT_AGENT_PROGRESS_SECONDS,
+            )
         )
 
         process = subprocess.Popen(
@@ -361,6 +560,7 @@ class BaseOpencodeStage(Stage):
         started_at = time.monotonic()
         last_output_at = started_at
         last_heartbeat_at = started_at
+        last_progress_at = started_at
         self._write_opencode_status(
             status_log_path,
             "started "
@@ -375,14 +575,18 @@ class BaseOpencodeStage(Stage):
         )
 
         try:
-            with open(stdout_log_path, "w", encoding="utf-8") as stdout_log, open(
-                stderr_log_path, "w", encoding="utf-8"
-            ) as stderr_log:
+            with (
+                open(stdout_log_path, "w", encoding="utf-8") as stdout_log,
+                open(stderr_log_path, "w", encoding="utf-8") as stderr_log,
+            ):
                 while selector.get_map():
                     selected = selector.select(timeout=0.5)
+                    now = time.monotonic()
                     if not selected:
-                        now = time.monotonic()
-                        if heartbeat_seconds > 0 and now - last_heartbeat_at >= heartbeat_seconds:
+                        if (
+                            heartbeat_seconds > 0
+                            and now - last_heartbeat_at >= heartbeat_seconds
+                        ):
                             self._log_opencode_heartbeat(
                                 status_log_path,
                                 started_at,
@@ -391,6 +595,19 @@ class BaseOpencodeStage(Stage):
                                 stderr_log_path,
                             )
                             last_heartbeat_at = now
+
+                    if (
+                        progress_callback
+                        and progress_seconds > 0
+                        and now - last_progress_at >= progress_seconds
+                    ):
+                        try:
+                            progress_callback("".join(stdout_chunks))
+                        except Exception:
+                            logger.exception(
+                                "Failed to publish OpenCode agent progress"
+                            )
+                        last_progress_at = now
 
                     for key, _ in selected:
                         line = key.fileobj.readline()
@@ -410,9 +627,7 @@ class BaseOpencodeStage(Stage):
                             if detector.observe(line):
                                 self._terminate_opencode(process)
                                 error_summary = summarize_opencode_error(
-                                    "\n".join(
-                                        [*stderr_chunks, detector.last_error]
-                                    )
+                                    "\n".join([*stderr_chunks, detector.last_error])
                                 )
                                 message = (
                                     "OpenCode stopped after "
@@ -447,13 +662,14 @@ class BaseOpencodeStage(Stage):
         finally:
             selector.close()
 
+        returncode = process.wait()
         self._write_opencode_status(
             status_log_path,
-            f"finished returncode={process.returncode} elapsed_s={int(time.monotonic() - started_at)}",
+            f"finished returncode={returncode} elapsed_s={int(time.monotonic() - started_at)}",
         )
         return subprocess.CompletedProcess(
             args,
-            process.wait(),
+            returncode,
             "".join(stdout_chunks),
             "".join(stderr_chunks),
         )
@@ -493,21 +709,7 @@ class BaseOpencodeStage(Stage):
             handle.write(f"{timestamp} {message}\n")
 
     def _extract_text_events(self, lines: List[str]) -> str:
-        chunks: List[str] = []
-        for line in lines:
-            trimmed = line.strip()
-            if not trimmed:
-                continue
-            try:
-                event = json.loads(trimmed)
-            except json.JSONDecodeError:
-                continue
-            if event.get("type") == "text":
-                part = event.get("part", {})
-                text = part.get("text")
-                if text:
-                    chunks.append(text)
-        return "".join(chunks).strip()
+        return parse_opencode_output("\n".join(lines)).text
 
 
 class OpencodePreparationStage(BaseOpencodeStage):
@@ -611,7 +813,15 @@ class OpencodeIntegrationStage(BaseOpencodeStage):
 
         question = self._extract_question(context)
         prompt = self._build_prompt(context, repo_dir, question)
-        result = self._run_opencode(repo_dir, prompt)
+        result = self._run_opencode(
+            repo_dir,
+            prompt,
+            progress_callback=lambda output: self._publish_agent_progress(
+                context, output
+            ),
+        )
+        parsed = parse_opencode_output(result.stdout)
+        context.metadata["agent_steps"] = parsed.steps
 
         if result.returncode != 0:
             error_msg = summarize_opencode_error(result.stderr)
@@ -623,8 +833,13 @@ class OpencodeIntegrationStage(BaseOpencodeStage):
         with open(events_path, "w", encoding="utf-8") as handle:
             handle.write(result.stdout)
 
-        content = self._extract_text_events(result.stdout.splitlines())
+        content = parsed.text
         if not content:
+            logger.warning(
+                "OpenCode produced no final text response json_events=%s non_json_lines=%s",
+                parsed.event_count,
+                parsed.invalid_line_count,
+            )
             content = "No response generated."
 
         with open(reply_path, "w", encoding="utf-8") as handle:
@@ -645,6 +860,54 @@ class OpencodeIntegrationStage(BaseOpencodeStage):
 
         return StageResult(context=context, should_stop=False)
 
+    def _publish_agent_progress(self, context: PipelineContext, output: str) -> None:
+        parsed = parse_opencode_output(output)
+        context.metadata["agent_steps"] = parsed.steps
+
+        details = format_agent_steps_details(parsed.steps)
+        if not details:
+            details = (
+                "<details>\n"
+                "<summary>Agent steps</summary>\n\n"
+                "_No completed agent steps yet._\n"
+                "</details>"
+            )
+
+        payload = context.webhook_payload
+        project_id = payload.get("project", {}).get("id")
+        noteable_type = context.metadata.get("noteable_type")
+        noteable_iid = extract_noteable_iid(payload)
+        if not project_id or not noteable_type or not noteable_iid:
+            return
+
+        body = (
+            "🤖 **OpenCode is still working**\n\n"
+            f"Running model `{self.model}` with agent `{self.agent}`.\n\n"
+            f"{details}"
+        )
+        if context.gitlab_note_id:
+            note_response = update_gitlab_note(
+                project_id,
+                noteable_type,
+                noteable_iid,
+                context.gitlab_note_id,
+                body,
+                project=payload.get("project"),
+            )
+        else:
+            note_response = post_gitlab_note(
+                project_id,
+                noteable_type,
+                noteable_iid,
+                body,
+                project=payload.get("project"),
+            )
+            if note_response:
+                context.gitlab_note_id = note_response.get("id")
+
+        if not note_response:
+            logger.warning("Failed to publish OpenCode agent progress note")
+
     def _validate_review_inputs(self, context: PipelineContext) -> None:
         if context.command not in {"oc_review", "oc_deepreview"}:
             return
@@ -656,7 +919,11 @@ class OpencodeIntegrationStage(BaseOpencodeStage):
         merge_request_state = str(snapshot.get("merge_request_state") or "").lower()
         thread_context_path = context.metadata.get("thread_context_path")
 
-        if merge_request_state and merge_request_state != "opened" and not thread_context_path:
+        if (
+            merge_request_state
+            and merge_request_state != "opened"
+            and not thread_context_path
+        ):
             raise RuntimeError(
                 "Cannot review this merge request reliably because it is not open and "
                 "the GitLab merge request diff could not be fetched. Refusing to compare "
@@ -679,7 +946,9 @@ class OpencodeIntegrationStage(BaseOpencodeStage):
         prep_report_path = context.metadata.get("prep_report_path")
         if prep_report_path:
             relative_path = os.path.relpath(prep_report_path, repo_dir)
-            prompt.append(f"Review the preparation report in {relative_path} before answering.")
+            prompt.append(
+                f"Review the preparation report in {relative_path} before answering."
+            )
 
         prompt.append(
             "Base the answer on the local repository and the provided GitLab context file."

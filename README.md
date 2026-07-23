@@ -95,6 +95,8 @@ Bot-authored notes are ignored by comparing the webhook `user.username` with `GI
 
 `OpencodeIntegrationStage` sets `OPENCODE_CONFIG` to this repo's `opencode.json` before launching `opencode run` inside the checked-out target repository. Set `OPENCODE_COMMAND` to use a wrapper or alternate binary, for example `OPENCODE_COMMAND=opencode-safe`.
 
+While the main OpenCode agent is running, GitBard updates its progress note every 60 seconds with completed tool calls and agent turns inside a collapsed `<details>` block. Override the interval with `GITBARD_AGENT_PROGRESS_INTERVAL_SECONDS`.
+
 Preparation-enabled pipelines run the optional repo-root `.gitbard.sh` hook first, then a `gitlab-prepare` OpenCode pass. Generated runtime artifacts such as `opencode_prep_report.md`, `opencode_prep_events.jsonl`, `opencode_reply.md`, and `opencode_events.jsonl` are ignored.
 
 ## Testing
