@@ -68,6 +68,7 @@ def test_opencode_integration_uses_question_and_issue_context(monkeypatch, tmp_p
     )
     assert captured["env"]["OPENCODE_CONFIG"].endswith("/GitBard/opencode.json")
     assert captured["env"]["PWD"] == str(tmp_path)
+    assert "--auto" in captured["args"]
     assert captured["args"][captured["args"].index("--dir") + 1] == str(tmp_path)
     assert context.agent_result is not None
     assert context.agent_result.content == "Answer ready"

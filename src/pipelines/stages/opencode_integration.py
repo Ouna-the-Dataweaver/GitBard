@@ -469,6 +469,7 @@ class BaseOpencodeStage(Stage):
 
         args = opencode_command_args(
             "run",
+            "--auto",
             "--dir",
             repo_dir,
             "--format",
